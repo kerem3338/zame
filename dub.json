@@ -1,0 +1,21 @@
+{
+	"authors": [
+		"zoda"
+	],
+	"copyright": "Copyright © 2025, zoda",
+	"dependencies": {
+		"arsd-official:png": "~>12.1.0",
+		"bindbc-sdl": "~>2.3.0",
+		"gamut": "~>3.3.5"
+	},
+	"description": "Zame Engine",
+	"lflags": [
+		"-m32mscoff"
+	],
+	"libs": [
+		"user32",
+		"gdi32"
+	],
+	"license": "proprietary",
+	"name": "zame"
+}

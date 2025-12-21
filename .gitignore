@@ -1,0 +1,16 @@
+.dub
+docs.json
+__dummy.html
+docs/
+/zame
+zame.so
+zame.dylib
+zame.dll
+zame.a
+zame.lib
+zame-test-*
+*.exe
+*.pdb
+*.o
+*.obj
+*.lst

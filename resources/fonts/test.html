@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<title>Bitmap Font Atlas + Info Generator</title>
+</head>
+<body>
+<h2>Bitmap Font Atlas + Info Generator</h2>
+<button id="generate">Generate PNG + Font Info</button>
+<canvas id="canvas"></canvas>
+<pre id="fontInfoOutput"></pre>
+
+<script>
+const lines = [
+    " !\"#$%&'()*+,-./",
+    "0123456789",
+    ":;<=>?",
+    "@ABCDEFGHIJKLMNOPQRSTUVWXYZÇĞİÖŞÜ",
+    "abcdefghijklmnopqrstuvwxyzçğıöşü",
+    "[\\]^_`{|}~"
+];
+
+const fw = 16;      // glyph width
+const fh = 24;      // glyph height
+const spacing = 1;  // extra spacing between glyphs
+const fontName = "Bitmap Font";
+
+// Compute canvas size
+let maxCols = Math.max(...lines.map(l => l.length));
+let totalWidth = maxCols * (fw + spacing) - spacing;
+let totalHeight = lines.length * fh;
+
+// Setup canvas
+const canvas = document.getElementById('canvas');
+canvas.width = totalWidth;
+canvas.height = totalHeight;
+const ctx = canvas.getContext('2d');
+
+// Transparent background
+ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+// Set monospaced font
+ctx.font = `${fh}px "Courier New", monospace`;
+ctx.textBaseline = "top";
+ctx.fillStyle = "black";
+
+// Generate font-info
+let fontInfo = `name:str:${fontName}\nsize:int:${fw}\nlineHeight:int:${fh}\n---\n\n`;
+let glyphPos = {};
+
+let y = 0;
+for (const line of lines) {
+    let x = 0;
+    for (const ch of line) {
+        if (ch !== ' ') ctx.fillText(ch, x, y); // skip drawing space
+        glyphPos[ch] = { x, y, w: fw, h: fh };
+        fontInfo += `${ch} x=${x} y=${y} w=${fw} h=${fh}\n`;
+        x += fw + spacing;
+    }
+    y += fh;
+}
+
+// Ensure fallback '?' exists
+if (!glyphPos['?']) {
+    glyphPos['?'] = glyphPos['a'];
+    fontInfo += `? x=${glyphPos['a'].x} y=${glyphPos['a'].y} w=${fw} h=${fh}\n`;
+}
+
+// Display font-info
+document.getElementById('fontInfoOutput').textContent = fontInfo;
+
+// Button to download PNG and font-info
+document.getElementById('generate').addEventListener('click', () => {
+    // Download PNG
+    const pngLink = document.createElement('a');
+    pngLink.download = 'font_atlas.png';
+    pngLink.href = canvas.toDataURL();
+    pngLink.click();
+
+    // Download font-info
+    const infoBlob = new Blob([fontInfo], { type: 'text/plain' });
+    const infoLink = document.createElement('a');
+    infoLink.download = 'font-info.txt';
+    infoLink.href = URL.createObjectURL(infoBlob);
+    infoLink.click();
+
+    console.log('PNG and font-info generated.');
+});
+</script>
+</body>
+</html>

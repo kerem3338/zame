@@ -1,0 +1,12 @@
+{
+	"fileVersion": 1,
+	"versions": {
+		"arsd-official": "12.1.0",
+		"bindbc-common": "1.0.5",
+		"bindbc-loader": "1.1.5",
+		"bindbc-sdl": "2.3.0",
+		"gamut": "3.3.5",
+		"intel-intrinsics": "1.13.0",
+		"miniz": "0.0.3"
+	}
+}
