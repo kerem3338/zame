@@ -1,21 +1,31 @@
 {
-	"authors": [
-		"zoda"
-	],
-	"copyright": "Copyright © 2025, zoda",
-	"dependencies": {
-		"arsd-official:png": "~>12.1.0",
-		"bindbc-sdl": "~>2.3.0",
-		"gamut": "~>3.3.5"
-	},
-	"description": "Zame Engine",
-	"lflags": [
-		"-m32mscoff"
-	],
-	"libs": [
-		"user32",
-		"gdi32"
-	],
-	"license": "proprietary",
-	"name": "zame"
+  "libs": [
+    "user32",
+    "gdi32",
+    "raylib"
+  ],
+  "lflags-posix": [
+    "-L."
+  ],
+  "lflags-osx": [
+    "-rpath",
+    "@executable_path/"
+  ],
+  "lflags-linux": [
+    "-rpath=$$ORIGIN"
+  ],
+  "lflags": [
+    "-m32mscoff"
+  ],
+  "authors": [
+    "zoda"
+  ],
+  "license": "proprietary",
+  "copyright": "Copyright © 2025, zoda",
+  "name": "zame",
+  "description": "Zame Engine",
+  "dependencies": {
+    "raylib-d": "~>5.5.3",
+    "gamut": "~>3.3.5"
+  }
 }

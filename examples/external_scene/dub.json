@@ -1,0 +1,7 @@
+{
+	"name": "external_scene",
+	"targetType": "dynamicLibrary",
+	"dependencies": {
+		"zame": {"path": "../../"}
+	}
+}

@@ -14,3 +14,7 @@ zame-test-*
 *.o
 *.obj
 *.lst
+*.exp
+external_scene.lib
+external_scene.exp
+external_scene.dll
