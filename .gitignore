@@ -15,6 +15,7 @@ zame-test-*
 *.obj
 *.lst
 *.exp
+dub.selections.json
 external_scene.lib
 external_scene.exp
 external_scene.dll

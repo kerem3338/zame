@@ -72,9 +72,14 @@ version(Windows) {
             UpdateWindow(hwnd);
 
             hdc = GetDC(hwnd);
+            instanceRef.logger.info("Window created successfully");
             return 0;
         }
 
+        void setWindowTitle(string title) {
+            SetWindowText(hwnd, title.toUTF16z);
+        }
+        
         override void setInstance(Instance inst) {
             this.instanceRef = inst;
         }

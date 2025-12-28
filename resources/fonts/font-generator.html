@@ -25,26 +25,24 @@ const fh = 24;      // glyph height
 const spacing = 1;  // extra spacing between glyphs
 const fontName = "Bitmap Font";
 
-// Compute canvas size
 let maxCols = Math.max(...lines.map(l => l.length));
 let totalWidth = maxCols * (fw + spacing) - spacing;
 let totalHeight = lines.length * fh;
 
-// Setup canvas
+
 const canvas = document.getElementById('canvas');
 canvas.width = totalWidth;
 canvas.height = totalHeight;
 const ctx = canvas.getContext('2d');
 
-// Transparent background
 ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-// Set monospaced font
+// Set monospaced font (IMPORTANT)
 ctx.font = `${fh}px "Courier New", monospace`;
 ctx.textBaseline = "top";
 ctx.fillStyle = "black";
 
-// Generate font-info
+// Generate .font-info
 let fontInfo = `name:str:${fontName}\nsize:int:${fw}\nlineHeight:int:${fh}\n---\n\n`;
 let glyphPos = {};
 

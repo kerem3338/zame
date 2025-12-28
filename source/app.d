@@ -11,7 +11,8 @@ import core.sys.windows.windows;
 
 import zad : testZad;
 
-auto PI = 3.14159;
+import std.math: PI, sin, cos;
+
 
 SceneManager g_sceneManager;
 
@@ -146,6 +147,7 @@ class GameScene : Scene {
 
 	void updateScoreText() {
 		rmg.data["score_text"] = font.getText(format("Score: %d", score), Color(255,0,0), 32);
+		rmg.data["test"] = getTestSurface(64,64);
 	}
 
 	this() {
@@ -174,7 +176,7 @@ class GameScene : Scene {
 	override void render(Surface surface) {
 		surface.fill(Color(50, 30, 30));
 		
-		int tileSize = 32;
+		/*int tileSize = 32;
 		for (int y = 0; y < surface.height; y += tileSize) {
 			for (int x = 0; x < surface.width; x += tileSize) {
 				bool isWhite = ((x / tileSize) + (y / tileSize)) % 2 == 0;
@@ -184,13 +186,15 @@ class GameScene : Scene {
 
 				Graphics.drawRect(surface, color, Rect(Point(x, y), Size(tileSize, tileSize)));
 			}
-		}
+		}*/
 
 		Graphics.drawLine(surface, Colors.blue, Point(0, 0), Point(instance.window.width, instance.window.height), 5);
 		Graphics.drawLine(surface, Colors.blue, Point(0, instance.window.height), Point(instance.window.width, 0), 5);
 
 		Graphics.drawRect(surface, Colors.red, Rect(Point(this.x-10, this.y-10), Size(20,20)));
 		surface.blit(rmg.data["score_text"].get!Surface, Point(20,20));
+		
+
 	}
 	
 	override void onEvent(Event event) {
@@ -319,33 +323,39 @@ class MadeInZameScene : Scene {
 }
 
 
+
+
 int main() {
 	import zad: testZad;
 	//testZad();
 
-	
 	Window window = new Window(800, 600, "Zame Engine Demo");
-	auto platform = new RaylibPlatform();
+	auto platform = new Win32Platform();
 	
 	Instance instance = new Instance(window, platform);
+	instance.doInitJobs();
 	
 	window.platform = platform;
 	platform.instanceRef = instance;
 	
+
 	if (platform.createWindow(window) != 0) {
 		writeln("Failed to create window");
 		return 1;
 	}
 	
-	platform.setTargetFps(60);
+	
+	
+	static if (hasMethod!(typeof(platform), "setTargetFps", int)) {
+		platform.setTargetFps(60);
+	}
 
 	writeln(format("Zame Engine\nPlatform: %s", instance.platform.platformName));
 	
 	SceneManager sceneManager = new SceneManager(instance);
 	g_sceneManager = sceneManager;
 	
-	sceneManager.changeScene(new MadeInZameScene());
-	//sceneManager.changeScene(new MainMenuScene());
+	sceneManager.changeScene(new GameScene());
 	
 	StopWatch frameTimer;
 	frameTimer.start();
@@ -372,16 +382,17 @@ int main() {
 		}
 		
 		sceneManager.update(deltaTime);
-		
+
 		Surface surface = window.surface;
 		sceneManager.render(surface);
 		
+		platform.setWindowTitle("sa");
 		platform.invalidate();
 		
 	}
 	
 	platform.cleanup();
-	writeln("Uygulama başarıyla sonlandı.");
+	writeln("Uygulama başarıyla sonlandı..");
 	
 	return 0;
 }

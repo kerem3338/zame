@@ -141,7 +141,13 @@ class RaylibPlatform : IPlatform {
 		texture = LoadTextureFromImage(image);
 		initialized = true;
 
+
+		instanceRef.logger.info("Window created successfully");
 		return 0;
+	}
+
+	void setWindowTitle(string title) {
+		SetWindowTitle(title.ptr);
 	}
 
 	override void setInstance(Instance inst) {

@@ -14,13 +14,10 @@
   "lflags-linux": [
     "-rpath=$$ORIGIN"
   ],
-  "lflags": [
-    "-m32mscoff"
-  ],
   "authors": [
     "zoda"
   ],
-  "license": "proprietary",
+  "license": "Apache-2.0",
   "copyright": "Copyright © 2025, zoda",
   "name": "zame",
   "description": "Zame Engine",
