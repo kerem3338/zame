@@ -1,0 +1,17 @@
+{
+    "name": "hello-world",
+    "description": "A simple Hello World example using Zame Engine",
+    "authors": [
+        "Kerem ATA"
+    ],
+    "targetType": "executable",
+    "dependencies": {
+        "zame": {
+            "path": "../../"
+        }
+    },
+    "lflags": [
+        "/LIBPATH:../../",
+        "/INCREMENTAL:NO"
+    ]
+}
