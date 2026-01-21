@@ -3,26 +3,22 @@ module zame.core.common3d;
 import zame;
 import std.math;
 
-/// Rotate a vector around the X-Z plane
 Vec3 rotate_xz(Vec3 v, float angle) {
     float c = cos(angle);
     float s = sin(angle);
     return Vec3(v.x * c - v.z * s, v.y, v.x * s + v.z * c);
 }
 
-/// Rotate a vector around the Y-Z plane
 Vec3 rotate_yz(Vec3 v, float angle) {
     float c = cos(angle * 0.7f);
     float s = sin(angle * 0.7f);
     return Vec3(v.x, v.y * c - v.z * s, v.y * s + v.z * c);
 }
 
-/// Translate a vector along Z axis
 Vec3 translate_z(Vec3 v, float dz) {
     return Vec3(v.x, v.y, v.z + dz);
 }
 
-/// Project 3D vector to 2D screen coordinates
 Point project(Vec3 v, uint width, uint height) {
     float px = v.x / v.z;
     float py = v.y / v.z;
@@ -30,7 +26,6 @@ Point project(Vec3 v, uint width, uint height) {
                  cast(int)((1.0f - (py + 1.0f) / 2.0f) * height));
 }
 
-/// Make a 3D quad from a 2D image (using app.Vec3)
 Vec3[4] make3DQuad(float width, float height, Vec3 center) {
     float hw = width * 0.5f;
     float hh = height * 0.5f;
@@ -42,7 +37,6 @@ Vec3[4] make3DQuad(float width, float height, Vec3 center) {
     ];
 }
 
-/// Rotate quad in 3D and project to 2D
 Point[] spinImage3D(Vec3[4] quad, float angleXZ, float angleYZ, float dz, uint screenWidth, uint screenHeight) {
     Point[] points;
     points.length = quad.length;

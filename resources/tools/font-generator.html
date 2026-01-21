@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<title>Realtime Bitmap Font Atlas Generator</title>
+<style>
+body {
+    font-family: system-ui, sans-serif;
+    display: flex;
+    gap: 20px;
+}
+.controls {
+    width: 320px;
+}
+.controls label {
+    display: block;
+    margin-top: 10px;
+}
+canvas {
+    border: 1px solid #aaa;
+    image-rendering: pixelated;
+}
+textarea {
+    width: 100%;
+    height: 140px;
+}
+pre {
+    white-space: pre-wrap;
+    font-size: 12px;
+}
+</style>
+</head>
+
+<body>
+
+<div class="controls">
+    <h3>Settings</h3>
+
+    <label>Font family
+        <input id="fontFamily" value="Courier New">
+    </label>
+
+    <label>Font size (px)
+        <input id="fontSize" type="number" value="24">
+    </label>
+
+    <label>Glyph width
+        <input id="fw" type="number" value="16">
+    </label>
+
+    <label>Glyph height
+        <input id="fh" type="number" value="24">
+    </label>
+
+    <label>Spacing
+        <input id="spacing" type="number" value="1">
+    </label>
+
+    <label>Padding
+        <input id="padding" type="number" value="0">
+    </label>
+
+    <label>Text color
+        <input id="color" type="color" value="#000000">
+    </label>
+
+    <label>Background color
+        <input id="bg" type="color" value="#ffffff">
+    </label>
+
+    <label>Fixed columns (0 = auto)
+        <input id="cols" type="number" value="0">
+    </label>
+
+    <label>Characters
+        <textarea id="chars"> !"#$%&'()*+,-./
+0123456789
+:;<=>?
+@ABCDEFGHIJKLMNOPQRSTUVWXYZÇĞİÖŞÜ
+abcdefghijklmnopqrstuvwxyzçğıöşü
+[\]^_`{|}~</textarea>
+    </label>
+
+    <button id="download">Download PNG + Info</button>
+</div>
+
+<div>
+    <canvas id="canvas"></canvas>
+    <pre id="info"></pre>
+</div>
+
+<script>
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
+
+// Input refs
+const fontFamilyInput = document.getElementById("fontFamily");
+const fontSizeInput = document.getElementById("fontSize");
+const fwInput = document.getElementById("fw");
+const fhInput = document.getElementById("fh");
+const spacingInput = document.getElementById("spacing");
+const paddingInput = document.getElementById("padding");
+const colorInput = document.getElementById("color");
+const bgInput = document.getElementById("bg");
+const colsInput = document.getElementById("cols");
+const charsInput = document.getElementById("chars");
+const infoOutput = document.getElementById("info");
+
+// Realtime updates
+document.querySelectorAll("input, textarea")
+    .forEach(el => el.addEventListener("input", generate));
+
+document.getElementById("download").onclick = download;
+
+function generate() {
+    const fontFamily = fontFamilyInput.value;
+    const fontSize = +fontSizeInput.value;
+    const fw = +fwInput.value;
+    const fh = +fhInput.value;
+    const spacing = +spacingInput.value;
+    const padding = +paddingInput.value;
+    const color = colorInput.value;
+    const bg = bgInput.value;
+    const fixedCols = +colsInput.value;
+
+    const lines = charsInput.value.split("\n");
+
+    const rows = lines.length;
+    const cols = fixedCols > 0
+        ? fixedCols
+        : Math.max(...lines.map(l => l.length));
+
+    const contentWidth =
+        cols * fw + (cols - 1) * spacing;
+
+    const contentHeight =
+        rows * fh;
+
+    canvas.width = contentWidth + padding * 2;
+    canvas.height = contentHeight + padding * 2;
+
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    ctx.font = `${fontSize}px "${fontFamily}", monospace`;
+    ctx.textBaseline = "top";
+    ctx.fillStyle = color;
+
+    let info =
+`name:str:${fontFamily}
+size:int:${fw}
+lineHeight:int:${fh}
+---
+
+`;
+
+    let y = padding;
+
+    for (const line of lines) {
+        let x = padding;
+
+        for (const ch of line) {
+            if (ch !== " ") ctx.fillText(ch, x, y);
+            info += `${ch} x=${x} y=${y} w=${fw} h=${fh}\n`;
+            x += fw + spacing;
+        }
+        y += fh;
+    }
+
+    infoOutput.textContent = info;
+}
+
+function download() {
+    const png = document.createElement("a");
+    png.download = "font_atlas.png";
+    png.href = canvas.toDataURL();
+    png.click();
+
+    const blob = new Blob([infoOutput.textContent], { type: "text/plain" });
+    const txt = document.createElement("a");
+    txt.download = "font-info.txt";
+    txt.href = URL.createObjectURL(blob);
+    txt.click();
+}
+
+// initial render
+generate();
+</script>
+
+</body>
+</html>

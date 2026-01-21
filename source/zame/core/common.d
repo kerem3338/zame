@@ -9,13 +9,19 @@ public import std.datetime.stopwatch : Duration;
 
 enum Result {
     ok,
+    error,
     unknown_error,
+    os_error,
     unknown_ok,
     unknown,
     animation_not_exists,
     surface_not_found,
     full_capacity_error,
     not_enough_memory,
+    override_error,
+    key_error,
+    file_not_found,
+    platform_not_supported
 }
 
 struct ResultStatus {
@@ -128,6 +134,40 @@ struct Vec3 {
 
 struct Vec2 {
     float x, y;
+    
+    this(float x, float y) {
+        this.x = x;
+        this.y = y;
+    }
+    
+    static Vec2 zero() {
+        return Vec2(0, 0);
+    }
+    
+    float length() const {
+        import std.math : sqrt;
+        return sqrt(x*x + y*y);
+    }
+    
+    Vec2 normalized() const {
+        float len = length();
+        if (len > 0) {
+            return Vec2(x/len, y/len);
+        }
+        return Vec2.zero();
+    }
+    
+    Vec2 opBinary(string op)(Vec2 other) const if (op == "+" || op == "-") {
+        mixin("return Vec2(x " ~ op ~ " other.x, y " ~ op ~ " other.y);");
+    }
+
+    Vec2 opBinary(string op)(float scalar) const if (op == "*" || op == "/") {
+        mixin("return Vec2(x " ~ op ~ " scalar, y " ~ op ~ " scalar);");
+    }
+
+    string toString() const {
+        return format("Vec2(%s, %s)", x, y);
+    }
 }
 
 struct Point {
@@ -141,21 +181,31 @@ struct Size {
 }
 
 struct Rect {
-    Point location;
-    Size  size;
+    int x,y,w,h;
 
-    alias loc  = location;
-    alias x=location.x;
-    alias y=location.y;
-    alias w=size.w;
-    alias h=size.h;
+    bool intersects(const Rect other) const {
+        return (x < other.x + other.w && x + w > other.x &&
+                y < other.y + other.h && y + h > other.y);
+    }
+
+    bool contains(Point p) const {
+        return (p.x >= x && p.x < x + w &&
+                p.y >= y && p.y < y + h);
+    }
 }
 
 struct Color {
-    uint r;
-    uint g;
-    uint b;
-    uint a = 255;
+    ubyte r;
+    ubyte g;
+    ubyte b;
+    ubyte a = 255;
+
+    this(int r, int g, int b, int a = 255) {
+        this.r = cast(ubyte)r;
+        this.g = cast(ubyte)g;
+        this.b = cast(ubyte)b;
+        this.a = cast(ubyte)a;
+    }
 }
 
 struct Timer {
@@ -180,6 +230,28 @@ struct Timer {
     }
 }
 
+struct Countdown {
+    Duration duration;
+    StopWatch watch;
+
+    this(Duration duration) {
+        this.duration = duration;
+        watch = StopWatch(AutoStart.yes);
+    }
+
+    bool isFinished() {
+        return watch.peek() >= duration;
+    }
+
+    Duration remaining() {
+        if (isFinished()) return Duration.zero;
+        return duration - watch.peek();
+    }
+
+    void reset() {
+        watch.reset();
+    }
+}
 
 
 

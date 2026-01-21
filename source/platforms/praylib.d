@@ -114,12 +114,17 @@ class RaylibPlatform : IPlatform {
 
 	Image image;
 	Texture2D texture;
+    IAudioDevice audioDevice;
 
 	bool initialized = false;
 	bool shouldQuit = false;
 
 	override string platformName() {
 		return "Raylib";
+	}
+
+	override PlatformCapabilities capabilities() {
+		return PlatformCapabilities(false);
 	}
 
 	override int createWindow(Window window) {
@@ -141,6 +146,8 @@ class RaylibPlatform : IPlatform {
 		texture = LoadTextureFromImage(image);
 		initialized = true;
 
+        audioDevice = new RaylibAudioDevice();
+        audioDevice.init();
 
 		instanceRef.logger.info("Window created successfully");
 		return 0;
@@ -154,9 +161,16 @@ class RaylibPlatform : IPlatform {
 		this.instanceRef = inst;
 	}
 
-	void setTargetFps(uint fps) {
+	override void setTargetFps(uint fps) {
 		SetTargetFPS(fps);
+		this.targetFps = fps;
 	}
+
+	override uint getTargetFps() {
+		return this.targetFps;
+	}
+
+    uint targetFps = 60;
 
 	void handleKeyboard() {
 		if (instanceRef is null)
@@ -168,7 +182,7 @@ class RaylibPlatform : IPlatform {
 			ke.code = toKeyCode(rayKey);
 			ke.mods = getModifiers();
 			ke.pressed = true;
-			instanceRef.pushEvent(Event(EventType.keyPressed, ke));
+			instanceRef.pushEvent(Event(EventType.keyPressed, windowRef, ke));
 
 			rayKey = GetKeyPressed();
 		}
@@ -180,6 +194,7 @@ class RaylibPlatform : IPlatform {
 			
 			Event e;
 			e.type = EventType.textInput;
+			e.window = windowRef;
 			e.textInput = te;
 			instanceRef.pushEvent(e);
 
@@ -214,8 +229,42 @@ class RaylibPlatform : IPlatform {
 
 			Event e;
 			e.type = EventType.mouseMoved;
+			e.window = windowRef;
 			e.mouseMoved = MouseMoveEvent(sx, sy);
 			instanceRef.pushEvent(e);
+
+            
+            import raylib : MouseButton, IsMouseButtonPressed, IsMouseButtonReleased;
+            MouseButton[3] buttons = [MouseButton.MOUSE_BUTTON_LEFT, MouseButton.MOUSE_BUTTON_RIGHT, MouseButton.MOUSE_BUTTON_MIDDLE];
+            MouseEvent.ButtonType[3] types = [MouseEvent.ButtonType.left, MouseEvent.ButtonType.right, MouseEvent.ButtonType.middle];
+
+            foreach (i; 0 .. 3) {
+                if (IsMouseButtonPressed(buttons[i])) {
+                    Event be;
+                    be.type = EventType.mouseButtonPressed;
+                    be.window = windowRef;
+                    be.mouse = MouseEvent(sx, sy, types[i]);
+                    instanceRef.pushEvent(be);
+                }
+                if (IsMouseButtonReleased(buttons[i])) {
+                    Event be;
+                    be.type = EventType.mouseButtonReleased;
+                    be.window = windowRef;
+                    be.mouse = MouseEvent(sx, sy, types[i]);
+                    instanceRef.pushEvent(be);
+                }
+            }
+
+            
+            import raylib : GetMouseWheelMove;
+            float wheel = GetMouseWheelMove();
+            if (wheel != 0) {
+                Event we;
+                we.type = EventType.mouseWheel;
+                we.window = windowRef;
+                we.mouseWheel.delta = cast(int)(wheel * 120); // Normalize to Win32-like delta (120 per notch)
+                instanceRef.pushEvent(we);
+            }
 		}
 	}
 
@@ -264,6 +313,7 @@ class RaylibPlatform : IPlatform {
 
 	override void cleanup() {
 		if (initialized) {
+            if (audioDevice !is null) audioDevice.cleanup();
 			UnloadTexture(texture);
 			UnloadImage(image);
 			initialized = false;
@@ -275,4 +325,72 @@ class RaylibPlatform : IPlatform {
 	override bool isRunning() {
 		return !shouldQuit;
 	}
+
+    override void exit() {
+        shouldQuit = true;
+    }
+
+    override IAudioDevice getAudioDevice() {
+        if (audioDevice is null) audioDevice = new NullAudioDevice();
+        return audioDevice;
+    }
+
+    override string getClipboard() {
+        import std.string : fromStringz;
+        const(char)* ptr = GetClipboardText();
+        if (ptr is null) return "";
+        return ptr.fromStringz.idup;
+    }
+
+    override void setClipboard(string text) {
+        import std.string : toStringz;
+        SetClipboardText(text.toStringz);
+    }
+}
+
+class RaylibSound : ISound {
+    import raylib : Sound, PlaySound, StopSound, SetSoundVolume, IsSoundPlaying, UnloadSound;
+    Sound rlSound;
+
+    this(Sound s) {
+        this.rlSound = s;
+    }
+
+    ~this() {
+        UnloadSound(rlSound);
+    }
+
+    override void play() { PlaySound(rlSound); }
+    override void stop() { StopSound(rlSound); }
+    override void setVolume(float volume) { SetSoundVolume(rlSound, volume); }
+    override bool isPlaying() { return IsSoundPlaying(rlSound); }
+    override void update() {}
+}
+
+class RaylibAudioDevice : IAudioDevice {
+    import raylib : InitAudioDevice, CloseAudioDevice, IsAudioDeviceReady, LoadSound, SetMasterVolume;
+
+    override void init() {
+        if (!IsAudioDeviceReady()) {
+            InitAudioDevice();
+        }
+    }
+
+    override void cleanup() {
+        if (IsAudioDeviceReady()) {
+            CloseAudioDevice();
+        }
+    }
+
+    override Outcome!ISound loadSound(string path) {
+        import std.string : toStringz;
+        auto s = LoadSound(path.toStringz);
+        // Note: checking if sound is loaded correctly in raylib-d is tricky as Sound struct has ptrs.
+        // Usually if it fails, it returns empty data.
+        return success!ISound(new RaylibSound(s));
+    }
+
+    override void setMasterVolume(float volume) {
+        SetMasterVolume(volume);
+    }
 }

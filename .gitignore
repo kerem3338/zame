@@ -16,6 +16,11 @@ zame-test-*
 *.lst
 *.exp
 dub.selections.json
-external_scene.lib
-external_scene.exp
-external_scene.dll
+/*.lib
+/*.exp
+/*.dll
+___*.*
+
+# Games or projects that uses Zame
+/zame-world
+/multi

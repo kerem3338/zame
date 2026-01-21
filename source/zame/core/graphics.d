@@ -6,6 +6,7 @@ import std.range;
 import std.format;
 import std.algorithm;
 import zame.core.common;
+import std.stdio;
 
 enum Colors: Color {
 	transparent = Color(255,255,255,0),
@@ -13,13 +14,18 @@ enum Colors: Color {
 	white = Color(255, 255, 255),
 	red = Color(255, 0 , 0),
 	green = Color(0, 255, 0),
-	blue = Color(0, 0, 255)
+	blue = Color(0, 0, 255),
+	yellow = Color(255, 255, 0),
+	orange = Color(255, 165, 0),
+	purple = Color(128, 0, 128)
 }
 
 class Surface {
 	uint width;
 	uint height;
 	private Color[] data;
+	private Rect clipRect;
+	private bool useClip = false;
 
 	@property @nogc nothrow inout(Color)[] rawData() inout
 	{
@@ -55,18 +61,27 @@ class Surface {
 		data[where.y * this.width + where.x] = color;
 	}
 
+	void setClip(Rect rect) {
+		clipRect = rect;
+		useClip = true;
+	}
+
+	void resetClip() {
+		useClip = false;
+	}
+
 	void blit(Surface src, Point where) {
 		blit(src, where.x, where.y);
 	}
 
 	Surface subSurface(Rect rect, Color fallBackColor = Colors.transparent) {
-		Surface outSurface = new Surface(rect.size.w, rect.size.h);
+		Surface outSurface = new Surface(rect.w, rect.h);
 
-		for (int y = 0; y < rect.size.h; y++) {
-			for (int x = 0; x < rect.size.w; x++) {
+		for (int y = 0; y < rect.h; y++) {
+			for (int x = 0; x < rect.w; x++) {
 
-				int srcX = rect.loc.x + x;
-				int srcY = rect.loc.y + y;
+				int srcX = rect.x + x;
+				int srcY = rect.y + y;
 
 				Color color;
 
@@ -88,34 +103,113 @@ class Surface {
 	}
 
 
-	void blit(Surface src, int destX, int destY, bool useAlpha = true) {
-		foreach (y; 0 .. src.height) {
-			int dstY = destY + y;
-			if (dstY < 0 || dstY >= cast(int)height) continue;
+	void blit(Surface src, int destX, int destY, bool useAlpha = true, ubyte globalAlpha = 255) {
+		int srcStartX = 0;
+		int srcStartY = 0;
+		int blitWidth = src.width;
+		int blitHeight = src.height;
 
-			foreach (x; 0 .. src.width) {
-				int dstX = destX + x;
-				if (dstX < 0 || dstX >= cast(int)width) continue;
+		// Clipping
+		if (destX < 0) {
+			srcStartX = -destX;
+			blitWidth += destX;
+			destX = 0;
+		}
+		if (destY < 0) {
+			srcStartY = -destY;
+			blitHeight += destY;
+			destY = 0;
+		}
+		if (destX + blitWidth > cast(int)width) {
+			blitWidth = cast(int)width - destX;
+		}
+		if (destY + blitHeight > cast(int)height) {
+			blitHeight = cast(int)height - destY;
+		}
 
-				Color srcColor = src.data[y * src.width + x];
-				if (useAlpha) {
-					if (srcColor.a == 0) continue;
-					if (srcColor.a == 255) {
-						this.data[dstY * width + dstX] = srcColor;
+		if (useClip) {
+			if (destX < clipRect.x) {
+				int diff = clipRect.x - destX;
+				srcStartX += diff;
+				blitWidth -= diff;
+				destX = clipRect.x;
+			}
+			if (destY < clipRect.y) {
+				int diff = clipRect.y - destY;
+				srcStartY += diff;
+				blitHeight -= diff;
+				destY = clipRect.y;
+			}
+			if (destX + blitWidth > clipRect.x + clipRect.w) {
+				blitWidth = (clipRect.x + clipRect.w) - destX;
+			}
+			if (destY + blitHeight > clipRect.y + clipRect.h) {
+				blitHeight = (clipRect.y + clipRect.h) - destY;
+			}
+		}
+
+		if (blitWidth <= 0 || blitHeight <= 0) return;
+
+		for (int y = 0; y < blitHeight; y++) {
+			int sy = srcStartY + y;
+			int dy = destY + y;
+			
+			// Bounds check to prevent overflow in both source and destination
+			if (sy < 0 || sy >= cast(int)src.height) continue;
+			if (dy < 0 || dy >= cast(int)height) continue;
+			
+			// Additional check to ensure the calculated index won't overflow
+			size_t srcIndex = sy * src.width + srcStartX;
+			size_t dstIndex = dy * this.width + destX;
+			if (srcIndex >= src.rawData.length || dstIndex >= data.length) continue;
+			
+			Color* srcLine = &src.data[srcIndex];
+			Color* dstLine = &data[dstIndex];
+
+			if (!useAlpha && globalAlpha == 255) {
+				import core.stdc.string : memcpy;
+				memcpy(dstLine, srcLine, blitWidth * Color.sizeof);
+			} else {
+				for (int x = 0; x < blitWidth; x++) {
+					Color sc = srcLine[x];
+                    if (globalAlpha != 255) {
+                        sc.a = cast(ubyte)(sc.a * globalAlpha / 255);
+                    }
+
+					if (sc.a == 0) continue;
+					if (sc.a == 255) {
+						dstLine[x] = sc;
 					} else {
-						Color dstColor = this.data[dstY * width + dstX];
-						this.data[dstY * width + dstX] = alphaBlend(srcColor, dstColor);
+						dstLine[x] = alphaBlend(sc, dstLine[x]);
 					}
-				} else {
-					this.data[dstY * width + dstX] = srcColor;
 				}
 			}
 		}
 	}
 
+    void makeColorTransparent(Color target) {
+        foreach (ref p; data) {
+            if (p.r == target.r && p.g == target.g && p.b == target.b) {
+                p.a = 0;
+            }
+        }
+    }
+
 	override string toString() {
 		return "Surface<"~this.width.to!string~"x"~this.height.to!string~">";
 	} 
+
+	Surface flip(bool horizontal, bool vertical) {
+		Surface outSurface = new Surface(this.width, this.height);
+		for (int y = 0; y < cast(int)this.height; y++) {
+			for (int x = 0; x < cast(int)this.width; x++) {
+				int srcX = horizontal ? (cast(int)this.width - 1 - x) : x;
+				int srcY = vertical ? (cast(int)this.height - 1 - y) : y;
+				outSurface.setPixel(Point(x, y), this.getPixel(Point(srcX, srcY)));
+			}
+		}
+		return outSurface;
+	}
 }
 
 class SpriteManager {
@@ -147,7 +241,7 @@ class Animation {
 		this.timer = timer;
 	}
 
-	void update() {
+	void update(float dt) {
 		if (timer.tick()) {
 			currentFrame = (currentFrame + 1) % frames.length;
 		}
@@ -170,6 +264,7 @@ class Animation {
 class AnimationManager {
 	Animation[string] animations;
 	Animation currentAnim;
+	string currentAnimName;
 
 	this(Animation[string] animations) {
 		this.animations = animations;
@@ -178,6 +273,7 @@ class AnimationManager {
 	Outcome!bool setCurrentAnimation(string id) {
 		if (auto p = id in animations) {
 			currentAnim = *p;
+			currentAnimName = id;
 			return success(true);
 		}
 		
@@ -188,6 +284,12 @@ class AnimationManager {
 		foreach(Animation animation; animations) {
 			animation.reset();
 		}
+	}
+
+	void update(float dt) {
+		if (currentAnim is null) return;
+
+		currentAnim.update(dt);
 	}
 
 	Surface getCurrentFrame() {
@@ -202,9 +304,16 @@ struct Graphics {
 		int dx = p1.x - p0.x;
 		int dy = p1.y - p0.y;
 
+        import std.math : isNaN;
+        if (isNaN(cast(float)dx) || isNaN(cast(float)dy)) return;
+
 		int steps = abs(dx) > abs(dy) ? abs(dx) : abs(dy);
+        
+        // Safety check to prevent infinite loops from garbage values
+        if (steps > 10000) steps = 10000; 
 
 		auto drawThicknessPoint = (float fx, float fy) {
+            if (isNaN(fx) || isNaN(fy)) return;
 			int ix = fx.to!int;
 			int iy = fy.to!int;
 			
@@ -243,26 +352,35 @@ struct Graphics {
 		}
 	}
 	static void drawRect(ref Surface surface, Color color, Rect rect) {
+		int x0 = max(0, rect.x);
+		int y0 = max(0, rect.y);
+		int x1 = min(cast(int)surface.width, rect.x + rect.w);
+		int y1 = min(cast(int)surface.height, rect.y + rect.h);
 
-		int x0 = rect.loc.x;
-		int y0 = rect.loc.y;
-		int x1 = rect.loc.x + rect.size.w;
-		int y1 = rect.loc.y + rect.size.h;
+		if (surface.useClip) {
+			x0 = max(x0, surface.clipRect.x);
+			y0 = max(y0, surface.clipRect.y);
+			x1 = min(x1, surface.clipRect.x + surface.clipRect.w);
+			y1 = min(y1, surface.clipRect.y + surface.clipRect.h);
+		}
 
-		foreach (y; y0 .. y1) {
-			foreach (x; x0 .. x1) {
+		if (x0 >= x1 || y0 >= y1) return;
 
-				if (x < 0 || y < 0 ||
-					x >= surface.width ||
-					y >= surface.height)
-					continue;
-
-				Color dst = surface.getPixel(Point(x, y));
-
-				surface.setPixel(
-					Point(x, y),
-					alphaBlend(color, dst)
-				);
+		if (color.a == 255) {
+			for (int y = y0; y < y1; y++) {
+				Color* line = &surface.data[y * surface.width + x0];
+				int width = x1 - x0;
+				for (int x = 0; x < width; x++) {
+					line[x] = color;
+				}
+			}
+		} else if (color.a > 0) {
+			for (int y = y0; y < y1; y++) {
+				Color* line = &surface.data[y * surface.width + x0];
+				int width = x1 - x0;
+				for (int x = 0; x < width; x++) {
+					line[x] = alphaBlend(color, line[x]);
+				}
 			}
 		}
 	}
@@ -271,8 +389,8 @@ struct Graphics {
 Surface getTestSurface(uint width, uint height, Color color1 = Color(127,127,127), Color color2=Color(255,255,255)) {
 	Surface testSurface = new Surface(width, height);
 	testSurface.fill(color2);
-	Graphics.drawRect(testSurface, color1, Rect(Point(0,0), Size(width/2, height/2)));
-	Graphics.drawRect(testSurface, color1, Rect(Point(width/2,height/2), Size(width/2, height/2)));
+	Graphics.drawRect(testSurface, color1, Rect(0,0, width/2, height/2));
+	Graphics.drawRect(testSurface, color1, Rect(width/2,height/2, width/2, height/2));
 	return testSurface;
 }
 
@@ -291,21 +409,22 @@ static Color alphaBlendFast(Color src, Color dst) {
 	return Color(r, g, b, 255);
 }
 
-Color alphaBlend(Color src, Color dst) {
-	if (src.a == 255) return src;
-	if (src.a == 0)   return dst;
+static Color alphaBlend(Color src, Color dst) {
+    if (src.a == 255) return src;
+    if (src.a == 0) return dst;
 
-	float a = src.a / 255.0f;
-	float ia = 1.0f - a;
+    uint a = src.a;
+    uint ia = 255 - a;
 
-	ubyte r = cast(ubyte)(src.r * a + dst.r * ia);
-	ubyte g = cast(ubyte)(src.g * a + dst.g * ia);
-	ubyte b = cast(ubyte)(src.b * a + dst.b * ia);
-	
-	// Composite alpha
-	ubyte outA = cast(ubyte)(src.a + (dst.a * (255 - src.a) / 255));
+    // More accurate integer alpha blending: (src * a + dst * (255 - a)) / 255
+    ubyte r = cast(ubyte)((src.r * a + dst.r * ia) / 255);
+    ubyte g = cast(ubyte)((src.g * a + dst.g * ia) / 255);
+    ubyte b = cast(ubyte)((src.b * a + dst.b * ia) / 255);
+    
+    // Alpha composite: src.a + dst.a * (255 - src.a) / 255
+    ubyte outA = cast(ubyte)(src.a + ((dst.a * ia) / 255));
 
-	return Color(r, g, b, outA);
+    return Color(r, g, b, outA);
 }
 
 string exportPPM3(Surface surface){
@@ -355,10 +474,14 @@ void loadPPM3(Surface* surface, string path)
 
 Surface scaleSurface(Surface src, int newW, int newH)
 {
+	if (newW <= 0 || newH <= 0 || src.width <= 0 || src.height <= 0) {
+        return new Surface(max(1, newW), max(1, newH));
+    }
+
 	auto dst = new Surface(newW, newH);
 
-	float sx = cast(float)(src.width - 1) / (newW - 1);
-	float sy = cast(float)(src.height - 1) / (newH - 1);
+	float sx = (newW > 1) ? cast(float)(src.width - 1) / (newW - 1) : 0.0f;
+	float sy = (newH > 1) ? cast(float)(src.height - 1) / (newH - 1) : 0.0f;
 
 	for (int y = 0; y < newH; y++)
 	{
@@ -434,6 +557,72 @@ ResultStatus loadFromPng(ref Surface dest, string filePath)
 		dest.blit(res.value, 0, 0, false);
 	}
 	return res.status;
+}
+
+Surface rotateSurface(Surface src, float angleRadians) {
+	import std.math : sin, cos, abs, PI;
+	
+	// Calculate bounding box for rotated image
+	float cosA = cos(angleRadians);
+	float sinA = sin(angleRadians);
+	
+	int w = src.width;
+	int h = src.height;
+	
+	// Calculate corners of rotated rectangle
+	float x1 = -w/2.0f * cosA - (-h/2.0f) * sinA;
+	float y1 = -w/2.0f * sinA + (-h/2.0f) * cosA;
+	float x2 = w/2.0f * cosA - (-h/2.0f) * sinA;
+	float y2 = w/2.0f * sinA + (-h/2.0f) * cosA;
+	float x3 = w/2.0f * cosA - h/2.0f * sinA;
+	float y3 = w/2.0f * sinA + h/2.0f * cosA;
+	float x4 = -w/2.0f * cosA - h/2.0f * sinA;
+	float y4 = -w/2.0f * sinA + h/2.0f * cosA;
+	
+	import std.algorithm : min, max;
+	float minX = min(min(x1, x2), min(x3, x4));
+	float maxX = max(max(x1, x2), max(x3, x4));
+	float minY = min(min(y1, y2), min(y3, y4));
+	float maxY = max(max(y1, y2), max(y3, y4));
+	
+	int newW = cast(int)(maxX - minX) + 1;
+	int newH = cast(int)(maxY - minY) + 1;
+	
+	auto dst = new Surface(newW, newH);
+	dst.fill(Colors.transparent);
+	
+	// Reverse rotation matrix
+	float centerX = newW / 2.0f;
+	float centerY = newH / 2.0f;
+	float srcCenterX = w / 2.0f;
+	float srcCenterY = h / 2.0f;
+	
+	for (int y = 0; y < newH; y++) {
+		for (int x = 0; x < newW; x++) {
+			// Translate to origin
+			float dx = x - centerX;
+			float dy = y - centerY;
+			
+			// Rotate backwards
+			float srcX = dx * cosA + dy * sinA + srcCenterX;
+			float srcY = -dx * sinA + dy * cosA + srcCenterY;
+			
+			// Sample from source
+			int sx = cast(int)(srcX);
+			int sy = cast(int)(srcY);
+			
+			if (sx >= 0 && sx < w && sy >= 0 && sy < h) {
+				dst.setPixel(Point(x, y), src.getPixel(Point(sx, sy)));
+			}
+		}
+	}
+	
+	return dst;
+}
+
+void blitRotated(Surface dest, Surface src, int destX, int destY, float angleRadians) {
+	Surface rotated = rotateSurface(src, angleRadians);
+	dest.blit(rotated, destX - rotated.width/2, destY - rotated.height/2);
 }
 
 void blitCentered(ref Surface surface, ref Surface destSurface, int x, int y) {

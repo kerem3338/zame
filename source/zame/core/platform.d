@@ -26,6 +26,7 @@ enum EventType {
 	mouseMoved,
 	mouseButtonPressed,
 	mouseButtonReleased,
+	mouseWheel,
 }
 
 enum KeyCode : ushort
@@ -85,25 +86,44 @@ struct MouseEvent {
 	ButtonType button;
 }
 
+struct MouseWheelEvent {
+	int delta;
+}
+
 struct Event {
 	EventType type;
+	Window window;
 	union {
 		KeyEvent key;
 		TextInputEvent textInput;
 		MouseEvent mouse;
 		MouseMoveEvent mouseMoved;
+		MouseWheelEvent mouseWheel;
 	}
+}
+
+struct PlatformCapabilities {
+	bool hasSubWindows;
 }
 
 class IPlatform {
 	abstract string platformName();
+	abstract PlatformCapabilities capabilities();
 
 	abstract int createWindow(Window window);
 	abstract void processMessages();
 	abstract void invalidate();
 	abstract void cleanup();
 	abstract bool isRunning();
+    abstract void exit();
+	abstract void setTargetFps(uint fps);
+	abstract uint getTargetFps();
 	void setInstance(Instance inst) {}
+    abstract IAudioDevice getAudioDevice();
+    void setIcon(string path) {}
+    
+    abstract string getClipboard();
+    abstract void setClipboard(string text);
 }
 
 class Window {
@@ -111,7 +131,9 @@ class Window {
 	uint height;
 	Surface surface;
 	string title;
+    string iconPath;
 	IPlatform platform;
+	Window parent;
 
 	this(uint width, uint height, string title="Zame Engine") {
 		this.width = width;
@@ -131,6 +153,8 @@ class Instance {
 	Event[] eventQueue;
 	IPlatform platform;
 	Logger logger;
+    IAudioDevice audio;
+    int mouseX, mouseY;
 
 	this(Window window, IPlatform platform) {
 		this.window = window;
@@ -141,11 +165,16 @@ class Instance {
 	}
 
 	void doInitJobs() {
+        this.audio = this.platform.getAudioDevice();
 		this.logger.info(format("Zame Engine v%s (%s)", VERSION, this.platform.platformName()));
 	}
 
 	void pushEvent(Event e) {
 		eventQueue ~= e;
+        if (e.type == EventType.mouseMoved) {
+            mouseX = e.mouseMoved.x;
+            mouseY = e.mouseMoved.y;
+        }
 	}
 
 	Event[] pollEvents() {
@@ -157,6 +186,10 @@ class Instance {
 	void update() {
 
 	}
+    
+    void exit() {
+        platform.exit();
+    }
 }
 
 void messageBox(string title, string message, bool nonBlocking = false, bool writeToConsole = false) {
