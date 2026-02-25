@@ -14,6 +14,9 @@ struct ThingEvent {
 	Thing receiver;
 }
 
+/++ 
+ * Like an entity but diffrent
+ +/
 class Thing {
 	Rect rect;
 	string[] tags;
@@ -31,6 +34,7 @@ class Thing {
 		this.rect = rect;
 	}
 	
+	/* Events */
 	void onCreated() {}
 	void onDestroyed() {}
 	void onUpdated(float dt) {}
@@ -42,12 +46,18 @@ class Thing {
 		onUpdated(dt);
 	}
 
+	/++
+	Destory the thing.
+	+/
 	void destroy() {
 		if (destroyed) return;
 		onDestroyed();
 		destroyed = true;
 	}
 	
+	/++
+	Get final visible surface of the thing.
+	+/
 	Surface getSurface() {
 		return animMgr !is null ? animMgr.getCurrentFrame() : null;
 	}
@@ -197,6 +207,9 @@ class ThingManager {
 		return nextId;
 	}
 	
+	/++ 
+	Clear all the things and manager state
+	+/
 	void clear() {
 		foreach(thing; things) {
 			thing.destroy();

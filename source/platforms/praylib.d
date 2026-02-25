@@ -120,7 +120,7 @@ class RaylibPlatform : IPlatform {
 	bool shouldQuit = false;
 
 	override string platformName() {
-		return "Raylib";
+		return PlatformName.raylib;
 	}
 
 	override PlatformCapabilities capabilities() {
@@ -275,7 +275,7 @@ class RaylibPlatform : IPlatform {
 		ubyte* data = cast(ubyte*)image.data;
 
 		foreach (i; 0 .. surfaceRef.rawData.length) {
-			auto c = surfaceRef.rawData[i]; // zame.Color
+			auto c = surfaceRef.rawData[i]; // zame.Color (BGRA)
 			size_t idx = i * 4;
 
 			data[idx + 0] = cast(ubyte)c.r;
@@ -346,6 +346,11 @@ class RaylibPlatform : IPlatform {
         import std.string : toStringz;
         SetClipboardText(text.toStringz);
     }
+
+    override void showMouse(bool visible) {
+        if (visible) ShowCursor();
+        else HideCursor();
+    }
 }
 
 class RaylibSound : ISound {
@@ -367,10 +372,31 @@ class RaylibSound : ISound {
     override void update() {}
 }
 
+class RaylibMusic : ISound {
+    import raylib : Music, PlayMusicStream, StopMusicStream, SetMusicVolume, IsMusicStreamPlaying, UpdateMusicStream, UnloadMusicStream;
+    Music rlMusic;
+
+    this(Music m) {
+        this.rlMusic = m;
+    }
+
+    ~this() {
+        UnloadMusicStream(rlMusic);
+    }
+
+    override void play() { PlayMusicStream(rlMusic); }
+    override void stop() { StopMusicStream(rlMusic); }
+    override void setVolume(float volume) { SetMusicVolume(rlMusic, volume); }
+    override bool isPlaying() { return IsMusicStreamPlaying(rlMusic); }
+    override void update() { UpdateMusicStream(rlMusic); }
+}
+
 class RaylibAudioDevice : IAudioDevice {
     import raylib : InitAudioDevice, CloseAudioDevice, IsAudioDeviceReady, LoadSound, SetMasterVolume;
 
     override void init() {
+        import raylib : SetTraceLogLevel, TraceLogLevel;
+        SetTraceLogLevel(TraceLogLevel.LOG_ALL);
         if (!IsAudioDeviceReady()) {
             InitAudioDevice();
         }
@@ -388,6 +414,23 @@ class RaylibAudioDevice : IAudioDevice {
         // Note: checking if sound is loaded correctly in raylib-d is tricky as Sound struct has ptrs.
         // Usually if it fails, it returns empty data.
         return success!ISound(new RaylibSound(s));
+    }
+
+    override Outcome!ISound loadMusic(string path) {
+        import raylib : LoadMusicStream, IsAudioDeviceReady;
+        import std.stdio : writeln;
+        writeln("[AUDIO] Loading music stream (Raylib): ", path);
+        if (!IsAudioDeviceReady()) {
+            writeln("[AUDIO] Error: Audio device is not ready (Raylib) when loading music!");
+            return failure!ISound(Result.error, "Audio device is not ready");
+        }
+        auto m = LoadMusicStream(path.toStringz);
+        if (m.frameCount == 0) {
+            writeln("[AUDIO] Failed to load music stream (frameCount == 0): ", path);
+            return failure!ISound(Result.error, "Failed to load music (frameCount == 0)");
+        }
+        writeln("[AUDIO] Music stream loaded: ", m.frameCount, " frames");
+        return success!ISound(new RaylibMusic(m));
     }
 
     override void setMasterVolume(float volume) {

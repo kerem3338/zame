@@ -19,6 +19,7 @@ interface Font {
 	Surface getText(string text, Color color, int fontSize);
 	Surface getTextRich(string text, int fontSize, ubyte baseAlpha = 255);
 	Surface getTextRich(Tuple!(string, Color)[] chunks, int fontSize, ubyte baseAlpha = 255);
+	string[] wrapText(string text, int fontSize, int maxWidth);
 }
 
 class BitmapFont : Font {
@@ -307,6 +308,27 @@ class BitmapFont : Font {
 
 		return outSurf;
 	}
+
+	string[] wrapText(string text, int fontSize, int maxWidth) {
+		import std.string : split;
+		string[] lines;
+		string[] words = text.split(" ");
+		string currentLine = "";
+		
+		foreach (word; words) {
+			string testLine = currentLine.length == 0 ? word : currentLine ~ " " ~ word;
+			Size s = getSize(testLine, fontSize);
+			if (s.w > maxWidth && currentLine.length > 0) {
+				lines ~= currentLine;
+				currentLine = word;
+			} else {
+				currentLine = testLine;
+			}
+		}
+		
+		if (currentLine.length > 0) lines ~= currentLine;
+		return lines;
+	}
 }
 
 class GenericBitmapFont : Font {
@@ -440,6 +462,27 @@ class GenericBitmapFont : Font {
 	Surface getTextRich(Tuple!(string, Color)[] chunks, int fontSize, ubyte baseAlpha = 255) {
 		return new Surface(1, 1);
 	}
+
+	string[] wrapText(string text, int fontSize, int maxWidth) {
+		import std.string : split;
+		string[] lines;
+		string[] words = text.split(" ");
+		string currentLine = "";
+		
+		foreach (word; words) {
+			string testLine = currentLine.length == 0 ? word : currentLine ~ " " ~ word;
+			Size s = getSize(testLine, fontSize);
+			if (s.w > maxWidth && currentLine.length > 0) {
+				lines ~= currentLine;
+				currentLine = word;
+			} else {
+				currentLine = testLine;
+			}
+		}
+		
+		if (currentLine.length > 0) lines ~= currentLine;
+		return lines;
+	}
 }
 
 class TrueTypeFont : Font {
@@ -458,7 +501,6 @@ class TrueTypeFont : Font {
 	private size_t hheaOffset;
 
 	// Cache
-	private Surface[string] glyphCache; // Key: "index_size"
 	private int[dchar] charMap;
 	
 	private ushort readU16(size_t offset) {
@@ -851,48 +893,51 @@ class TrueTypeFont : Font {
 		// Or just one big list of edges and iterate Y?
 		// Since H is small (fontSize * SS), array of lists is fine.
 		
-		float[][] activeEdges = new float[][](bufH);
+		struct EdgeIntersection {
+			float x;
+			int dir; // 1 for up, -1 for down
+		}
+		
+		EdgeIntersection[][] activeEdges = new EdgeIntersection[][](bufH);
 		
 		foreach(e; edges) {
 			PointF p0 = e.p0;
 			PointF p1 = e.p1;
 			
-			// Skip horizontal
-			if (abs(p0.y - p1.y) < 0.01) continue;
+			if (abs(p0.y - p1.y) < 0.001) continue;
 			
+			int dir = (p1.y > p0.y) ? 1 : -1;
 			if (p0.y > p1.y) { auto tmp = p0; p0 = p1; p1 = tmp; }
-			// p0 is y-min, p1 is y-max
 			
-			int yStart = cast(int)ceil(p0.y);
-			int yEnd = cast(int)ceil(p1.y);
+			// We want to sample at pixel CENTERS (y + 0.5)
+			int yStart = cast(int)ceil(p0.y - 0.5f);
+			int yEnd = cast(int)ceil(p1.y - 0.5f);
 			
-			if (yEnd > bufH) yEnd = bufH;
 			if (yStart < 0) yStart = 0;
+			if (yEnd > bufH) yEnd = bufH;
 			
 			float dx = (p1.x - p0.x) / (p1.y - p0.y);
-			float x = p0.x + (yStart - p0.y) * dx;
 			
 			for(int y = yStart; y < yEnd; y++) {
-				activeEdges[y] ~= x;
-				x += dx;
+				float sampleY = y + 0.5f;
+				float x = p0.x + (sampleY - p0.y) * dx;
+				activeEdges[y] ~= EdgeIntersection(x, dir);
 			}
 		}
 		
-		// Fill using proper even-odd rule
-		// For each scanline, toggle fill state at each edge crossing
 		for(int y=0; y < bufH; y++) {
 			 if (activeEdges[y].length == 0) continue;
-			 activeEdges[y].sort();
 			 
-			 // Even-odd fill: toggle fill state at each edge
+			 // Sort by X
+			 activeEdges[y].sort!((a, b) => a.x < b.x);
+			 
 			 bool filling = false;
 			 int lastX = 0;
 			 
-			 foreach(edgeX; activeEdges[y]) {
-				 int x = cast(int)edgeX;
+			 foreach(edge; activeEdges[y]) {
+				 int x = cast(int)floor(edge.x + 0.5f);
 				 
 				 if (filling) {
-					 // Fill from lastX to x
 					 int x0 = max(0, lastX);
 					 int x1 = min(bufW, x);
 					 for(int px = x0; px < x1; px++) {
@@ -964,59 +1009,70 @@ class TrueTypeFont : Font {
 		return Size(w, fontSize);
 	}
 
+	private struct CachedGlyph {
+		Surface s;
+		int adv;
+		int yOff;
+	}
+
+	private CachedGlyph[string] glyphCache;
+
 	Surface getText(string text, Color color, int fontSize) {
-		if (text.length == 0) return new Surface(1,1);
-		
+		if (text.length == 0) return new Surface(1, 1);
+
 		// Get font metrics for baseline calculation
 		short ascender = readI16(hheaOffset + 4);
-		short descender = readI16(hheaOffset + 6);
 		float scale = cast(float)fontSize / unitsPerEm;
 		int baselineOffset = cast(int)(ascender * scale);
-		
+
 		// Rasterize each glyph
-		struct GlyphRes { Surface s; int adv; int yOff; }
-		GlyphRes[] glyphs;
+		CachedGlyph[] glyphs;
 		int totalW = 0;
 		int maxH = fontSize;
-		
-		foreach(dchar c; text) {
+
+		foreach (dchar c; text) {
 			int idx = (c in charMap) ? charMap[c] : 0;
 			if (idx == 0 && c != ' ') idx = charMap.get('?', 0);
-			
-			Surface s;
-			int adv = 0;
-			int yOff = 0;
-			
-			s = rasterizeGlyph(idx, fontSize, adv, yOff);
-			if (s.height > maxH) maxH = s.height;
-			glyphs ~= GlyphRes(s, adv, yOff);
-			totalW += adv;
+
+			string cacheKey = format("%d_%d", idx, fontSize);
+			CachedGlyph g;
+
+			if (auto p = cacheKey in glyphCache) {
+				g = *p;
+			} else {
+				int adv = 0;
+				int yOff = 0;
+				Surface s = rasterizeGlyph(idx, fontSize, adv, yOff);
+				g = CachedGlyph(s, adv, yOff);
+				glyphCache[cacheKey] = g;
+			}
+
+			if (g.s.height > maxH) maxH = g.s.height;
+			glyphs ~= g;
+			totalW += g.adv;
 		}
-		
+
 		if (totalW == 0) totalW = 1;
 		Surface result = new Surface(totalW, cast(int)(fontSize * 1.5));
 		result.fill(Colors.transparent);
-		
+
 		int x = 0;
-		
-		foreach(g; glyphs) {
+
+		foreach (g; glyphs) {
 			// Calculate Y position based on baseline
-			// baselineOffset is distance from top to baseline
-			// g.yOff is the glyph's maxY (distance from baseline to top of glyph)
 			int y = baselineOffset - g.yOff;
-			
 			result.blit(g.s, x, y, true);
 			x += g.adv;
 		}
-		
+
 		// Apply color globally
-		foreach(ref p; result.rawData) {
+		foreach (ref p; result.rawData) {
 			if (p.a > 0) {
 				p.r = color.r; p.g = color.g; p.b = color.b;
 				p.a = cast(ubyte)(p.a * color.a / 255);
 			}
 		}
-		
+
 		return result;
 	}
 
@@ -1089,5 +1145,26 @@ class TrueTypeFont : Font {
 		}
 		
 		return outSurf;
+	}
+
+	string[] wrapText(string text, int fontSize, int maxWidth) {
+		import std.string : split;
+		string[] lines;
+		string[] words = text.split(" ");
+		string currentLine = "";
+		
+		foreach (word; words) {
+			string testLine = currentLine.length == 0 ? word : currentLine ~ " " ~ word;
+			Size s = getSize(testLine, fontSize);
+			if (s.w > maxWidth && currentLine.length > 0) {
+				lines ~= currentLine;
+				currentLine = word;
+			} else {
+				currentLine = testLine;
+			}
+		}
+		
+		if (currentLine.length > 0) lines ~= currentLine;
+		return lines;
 	}
 }

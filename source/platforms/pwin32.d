@@ -20,7 +20,7 @@ version(Windows) {
 			HWND hwnd;
 			HDC hdc;
 			Window windowRef;
-			uint[] tempBuffer;
+			uint[] tempBuffer; // Deprecated, but keeping for compatibility if needed elsewhere
 			Surface surfaceRef;
 		}
 
@@ -30,7 +30,7 @@ version(Windows) {
 		bool shouldQuit = false;
 
 		override string platformName() {
-			return "Win32";
+			return PlatformName.win32;
 		}
 
 		override PlatformCapabilities capabilities() {
@@ -106,7 +106,7 @@ version(Windows) {
 			ctx.hdc = GetDC(hwnd);
 			ctx.windowRef = window;
 			ctx.surfaceRef = window.surface;
-			ctx.tempBuffer = new uint[ctx.surfaceRef.width * ctx.surfaceRef.height];
+			// ctx.tempBuffer = new uint[ctx.surfaceRef.width * ctx.surfaceRef.height]; // No longer needed
 			contexts[hwnd] = ctx;
 
 			ShowWindow(hwnd, SW_SHOW);
@@ -117,8 +117,8 @@ version(Windows) {
 			// Initialize audio device if not already
 			if (this.audioDevice is null) {
 				this.audioDevice = new Win32RaylibAudioDevice();
-				this.audioDevice.init();
 			}
+			(cast(Win32RaylibAudioDevice)this.audioDevice).realInit();
 
 			instanceRef.logger.info("Window created successfully");
 			return 0;
@@ -145,7 +145,7 @@ version(Windows) {
 			return this.targetFps;
 		}
 
-		override void setIcon(string path) {
+	override void setIcon(string path) {
 			if (mainHwnd is null) return;
 			HICON hIcon = createHIconFromFile(path);
 			if (hIcon !is null) {
@@ -153,6 +153,20 @@ version(Windows) {
 				SendMessageW(mainHwnd, WM_SETICON, ICON_SMALL, cast(LPARAM)hIcon);
 			}
 		}
+
+        void setWindowSize(Window window, int width, int height) {
+            foreach(hwnd, ctx; contexts) {
+                if (ctx.windowRef is window) {
+                    RECT rect = RECT(0, 0, width, height);
+                    DWORD style = GetWindowLongW(cast(HWND)hwnd, GWL_STYLE);
+                    AdjustWindowRect(&rect, style, FALSE);
+                    int w = rect.right - rect.left;
+                    int h = rect.bottom - rect.top;
+                    SetWindowPos(cast(HWND)hwnd, null, 0, 0, w, h, SWP_NOMOVE | SWP_NOZORDER);
+                    break;
+                }
+            }
+        }
 
 		private HICON createHIconFromFile(string path) {
 			import zame.core.graphics : surfaceFromImage, Surface;
@@ -283,23 +297,12 @@ version(Windows) {
 			if (pCtx is null) return;
 			auto ctx = *pCtx;
 
-			if (ctx.surfaceRef is null || ctx.tempBuffer.length == 0) return;
+			if (ctx.surfaceRef is null) return;
 			
 			PAINTSTRUCT ps;
 			HDC hdcPaint = BeginPaint(hwnd, &ps);
 
-			// Update temp buffer with surface data (Optimized pointer-based conversion)
-			zame.Color* src = ctx.surfaceRef.rawData.ptr;
-			uint* dst = ctx.tempBuffer.ptr;
-			size_t count = ctx.tempBuffer.length;
-
-			foreach (i; 0 .. count) {
-				zame.Color c = src[i];
-				// BGRA format for Windows
-				dst[i] = (c.b) | (c.g << 8) | (c.r << 16) | (c.a << 24);
-			}
-
-			BITMAPINFO bmi = void;
+			BITMAPINFO bmi;
 			bmi.bmiHeader.biSize = BITMAPINFOHEADER.sizeof;
 			bmi.bmiHeader.biWidth = ctx.surfaceRef.width;
 			bmi.bmiHeader.biHeight = -cast(int)ctx.surfaceRef.height;
@@ -316,7 +319,7 @@ version(Windows) {
 				hdcPaint,
 				0, 0, winW, winH,
 				0, 0, ctx.surfaceRef.width, ctx.surfaceRef.height,
-				ctx.tempBuffer.ptr,
+				ctx.surfaceRef.rawData.ptr,
 				&bmi,
 				DIB_RGB_COLORS,
 				SRCCOPY
@@ -406,6 +409,26 @@ version(Windows) {
 			e.mouseWheel.delta = cast(int)delta;
 			instanceRef.pushEvent(e);
 		}
+
+        void handleResize(HWND hwnd, int width, int height) {
+            auto pCtx = hwnd in contexts;
+            if (pCtx is null || instanceRef is null) return;
+            auto ctx = *pCtx;
+            
+            // Resize internal logic
+            ctx.windowRef.onResize(width, height);
+            ctx.surfaceRef = ctx.windowRef.surface;
+            contexts[hwnd] = ctx; // Update struct copy? D structs... context is value type?
+            // Actually contexts[hwnd] returns ref or copy? It's an AA.
+            // But we need to update it back if we modified it
+            contexts[hwnd].surfaceRef = ctx.windowRef.surface;
+
+            Event e;
+            e.type = EventType.resized;
+            e.window = ctx.windowRef;
+            e.resize = WindowResizeEvent(width, height);
+            instanceRef.pushEvent(e);
+        }
 
 		KeyCode toKeyCode(ushort vk) {
 			switch (vk) {
@@ -536,6 +559,10 @@ version(Windows) {
 			CloseClipboard();
 		}
 
+		override void showMouse(bool visible) {
+			ShowCursor(visible ? TRUE : FALSE);
+		}
+
 		IAudioDevice audioDevice;
 	}
 
@@ -560,10 +587,35 @@ version(Windows) {
 		override void update() {}
 	}
 
+	class Win32RaylibMusic : ISound {
+		import raylib : Music, PlayMusicStream, StopMusicStream, SetMusicVolume, IsMusicStreamPlaying, UpdateMusicStream, UnloadMusicStream;
+		Music rlMusic;
+
+		this(Music m) {
+			this.rlMusic = m;
+		}
+
+		~this() {
+			UnloadMusicStream(rlMusic);
+		}
+
+		override void play() { PlayMusicStream(rlMusic); }
+		override void stop() { StopMusicStream(rlMusic); }
+		override void setVolume(float volume) { SetMusicVolume(rlMusic, volume); }
+		override bool isPlaying() { return IsMusicStreamPlaying(rlMusic); }
+		override void update() { UpdateMusicStream(rlMusic); }
+	}
+
 	class Win32RaylibAudioDevice : IAudioDevice {
 		import raylib : InitAudioDevice, CloseAudioDevice, IsAudioDeviceReady, LoadSound, SetMasterVolume;
 
 		override void init() {
+			// Do nothing here, wait for createWindow to ensure window is ready
+			import raylib : SetTraceLogLevel, TraceLogLevel;
+			SetTraceLogLevel(TraceLogLevel.LOG_ALL);
+		}
+
+		void realInit() {
 			if (!IsAudioDeviceReady()) {
 				InitAudioDevice();
 			}
@@ -578,6 +630,23 @@ version(Windows) {
 		override Outcome!ISound loadSound(string path) {
 			auto s = LoadSound(path.toStringz);
 			return success!ISound(new Win32RaylibSound(s));
+		}
+
+		override Outcome!ISound loadMusic(string path) {
+			import raylib : LoadMusicStream, IsAudioDeviceReady;
+			import std.stdio : writeln;
+			writeln("[AUDIO] Loading music stream: ", path);
+			if (!IsAudioDeviceReady()) {
+				writeln("[AUDIO] Error: Audio device is not ready when loading music!");
+				return failure!ISound(Result.error, "Audio device is not ready");
+			}
+			auto m = LoadMusicStream(path.toStringz);
+			if (m.frameCount == 0) {
+				writeln("[AUDIO] Failed to load music stream (frameCount == 0): ", path);
+				return failure!ISound(Result.error, "Failed to load music (frameCount == 0)");
+			}
+			writeln("[AUDIO] Music stream loaded: ", m.frameCount, " frames");
+			return success!ISound(new Win32RaylibMusic(m));
 		}
 
 		override void setMasterVolume(float volume) {
@@ -637,6 +706,12 @@ version(Windows) {
 			case WM_PAINT:
 				platform.handlePaint(hwnd);
 				return 0;
+
+            case WM_SIZE:
+                int width = cast(int)LOWORD(lParam);
+                int height = cast(int)HIWORD(lParam);
+                platform.handleResize(hwnd, width, height);
+                return 0;
 
 			case WM_ERASEBKGND:
 				return 1; // Prevent background erasing to reduce flickering

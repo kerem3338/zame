@@ -7,6 +7,9 @@ import std.format;
 
 public import std.datetime.stopwatch : Duration;
 
+/++ 
+ * Operation result statuses 
+ +/
 enum Result {
     ok,
     error,
@@ -173,6 +176,10 @@ struct Vec2 {
 struct Point {
     int x;
     int y;
+
+    static Point zero() {
+        return Point(0,0);
+    }
 }
 
 struct Size {
@@ -195,9 +202,9 @@ struct Rect {
 }
 
 struct Color {
-    ubyte r;
-    ubyte g;
     ubyte b;
+    ubyte g;
+    ubyte r;
     ubyte a = 255;
 
     this(int r, int g, int b, int a = 255) {

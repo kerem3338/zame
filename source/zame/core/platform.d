@@ -19,6 +19,13 @@ version (Windows) {
 	pragma(lib, "winmm");
 }
 
+enum PlatformName : string {
+	win32 = "Win32",
+	win64 = win32,
+	windows = win32,
+	raylib = "Raylib"
+}
+
 enum EventType {
 	keyPressed,
 	keyReleased,
@@ -27,6 +34,7 @@ enum EventType {
 	mouseButtonPressed,
 	mouseButtonReleased,
 	mouseWheel,
+    resized
 }
 
 enum KeyCode : ushort
@@ -90,6 +98,10 @@ struct MouseWheelEvent {
 	int delta;
 }
 
+struct WindowResizeEvent {
+    int width, height;
+}
+
 struct Event {
 	EventType type;
 	Window window;
@@ -99,6 +111,7 @@ struct Event {
 		MouseEvent mouse;
 		MouseMoveEvent mouseMoved;
 		MouseWheelEvent mouseWheel;
+        WindowResizeEvent resize;
 	}
 }
 
@@ -124,6 +137,7 @@ class IPlatform {
     
     abstract string getClipboard();
     abstract void setClipboard(string text);
+    abstract void showMouse(bool visible);
 }
 
 class Window {
@@ -145,6 +159,17 @@ class Window {
 	int createWindow() {
 		return platform.createWindow(this);
 	}
+
+    void onResize(int width, int height) {
+        if (width <= 0 || height <= 0) return;
+        this.width = width;
+        this.height = height;
+        this.surface = new Surface(width, height);
+    }
+
+    Size size() {
+    	return Size(width, height);
+    }
 }
 
 class Instance {
@@ -154,6 +179,7 @@ class Instance {
 	IPlatform platform;
 	Logger logger;
     IAudioDevice audio;
+    SoundManager soundManager;
     int mouseX, mouseY;
 
 	this(Window window, IPlatform platform) {
@@ -166,6 +192,7 @@ class Instance {
 
 	void doInitJobs() {
         this.audio = this.platform.getAudioDevice();
+        this.soundManager = new SoundManager(this.audio);
 		this.logger.info(format("Zame Engine v%s (%s)", VERSION, this.platform.platformName()));
 	}
 
@@ -195,10 +222,11 @@ class Instance {
 void messageBox(string title, string message, bool nonBlocking = false, bool writeToConsole = false) {
     void show() {
         version (Windows) {
+            import std.string : toStringz;
             MessageBoxA(
                 null,
-                message.ptr,
-                title.ptr,
+                message.toStringz,
+                title.toStringz,
                 MB_OK | MB_ICONINFORMATION
             );
         }
@@ -240,7 +268,7 @@ string getFileDialog(
 ) {
 	string path;
 
-	version (Windowsd) {
+	version (Windows) {
 		wchar[260] fileBuffer;
 
 		string filterStr;
@@ -269,7 +297,8 @@ string getFileDialog(
 			ofn.Flags |= OFN_EXTENSIONDIFFERENT;
 
 		if (GetOpenFileNameW(&ofn)) {
-			return to!string(fileBuffer.ptr);
+			return toUTF8(fromStringz(fileBuffer.ptr));
+
 		}
 
 		return "";

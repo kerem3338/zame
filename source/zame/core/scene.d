@@ -19,7 +19,9 @@ abstract class Scene {
 	
 	abstract void onEvent(Event event);
 
-	override string toString() {
+	void updateAudio() {}
+
+	override string toString() const {
 		return "Scene()";
 	}
 }
@@ -64,6 +66,12 @@ public:
 		}
 	}
 	
+	void updateAudio() {
+		if (currentScene !is null) {
+			currentScene.updateAudio();
+		}
+	}
+	
 	void render(Surface surface) {
 		if (currentScene !is null) {
 			currentScene.render(surface);
@@ -84,7 +92,7 @@ public:
 		return currentScene !is null;
 	}
 
-	override string toString() {
+	override string toString() const {
 		return "SceneManager(currentScene: "~ (currentScene !is null ? currentScene.toString() : "null") ~")";
 	}
 }

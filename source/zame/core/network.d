@@ -16,7 +16,7 @@ enum RELIABLE_TIMEOUT_MS = 150;
 enum MAX_RETRIES = 3;
 enum MAX_PENDING_ACKS = 256;
 enum SEQUENCE_WINDOW = 64;
-enum CONNECTION_TIMEOUT_MS = 30000; // 30 seconds
+enum CONNECTION_TIMEOUT_MS = 10000; // 10 seconds
 
 // Special packet types
 enum ubyte PACKET_TYPE_WELCOME = 255;
@@ -57,6 +57,7 @@ class NetworkClient {
 	private StopWatch timer;
 
 	Logger logger = null;
+    public int rtt = 0;
 
 	this() {
 		this(null);
@@ -238,7 +239,12 @@ class NetworkClient {
 	private void handleAck(ubyte[] data) {
 		if (data.length < 4) return;
 		uint sequence = *cast(uint*)data.ptr;
-		state.pendingAcks.remove(sequence);
+        
+        if (sequence in state.pendingAcks) {
+            long now = timer.peek().total!"msecs";
+            rtt = cast(int)(now - state.pendingAcks[sequence].timestamp);
+            state.pendingAcks.remove(sequence);
+        }
 	}
 
 	private NetworkPacket parsePacket(ubyte[] buffer) {

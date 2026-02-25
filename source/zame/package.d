@@ -15,7 +15,13 @@
 */
 module zame;
 
-enum string VERSION = "0.0.2";
+struct SemanticVersion {
+   int major;
+   int minor;
+   int patch;
+}
+
+enum string VERSION = "0.0.3";
 enum string AUTHOR = "Kerem ATA (Zoda)";
 enum string LICENSE = "Apache-2.0";
 
@@ -32,6 +38,8 @@ public import zame.core.profiler;
 public import zame.core.audio;
 public import zame.core.network;
 public import zame.core.math;
+public import zame.core.file;
 public import zame.core.gui.components;
+public import zame.core.cache;
 
 public import zame.translation;
