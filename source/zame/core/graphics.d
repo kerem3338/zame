@@ -201,10 +201,6 @@ class Surface {
         }
     }
 
-	override string  toString() const {
-		return "Surface<"~this.width.to!string~"x"~this.height.to!string~">";
-	} 
-
 	Surface flip(bool horizontal, bool vertical) {
 		Surface outSurface = new Surface(this.width, this.height);
 		for (int y = 0; y < cast(int)this.height; y++) {
@@ -215,6 +211,15 @@ class Surface {
 			}
 		}
 		return outSurface;
+	}
+
+	Point corner0() {return Point(0,0);}
+	Point corner1() {return Point(width,0);}
+	Point corner2() {return Point(0,height);}
+	Point corner3() {return Point(width, height);}
+
+	override string  toString() const {
+		return "Surface<"~this.width.to!string~"x"~this.height.to!string~">";
 	}
 }
 
