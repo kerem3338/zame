@@ -1,10 +1,11 @@
 module zame.core.gui.gui_object;
 
 import std.variant;
-import std.algorithm : sort;
+import std.algorithm;
 import zame.core.common;
 import zame.core.graphics;
 import zame.core.platform;
+import zame.core.profiler;
 
 enum Dock {
     None,
@@ -96,6 +97,7 @@ class GUIManager {
     Window targetWindow;
     Instance instance;
     GUIObject focusedObject;
+    Profiler profiler;
 
     this(Instance instance, Size size, Window targetWindow = null) {
         this.instance = instance;
@@ -110,10 +112,8 @@ class GUIManager {
     }
 
     void removeObject(GUIObject obj) {
-        import std.algorithm : remove;
         objects = objects.remove!(o => o.id == obj.id);
         
-        // Clear focus if the object or any of its children was focused
         if (focusedObject !is null) {
             auto p = focusedObject;
             while (p !is null) {
@@ -197,7 +197,7 @@ class GUIManager {
                 obj.bounds = Rect(current.x + obj.margin[0], current.y + obj.margin[1], current.w - obj.margin[0] - obj.margin[2], obj.bounds.h);
                 current.y += obj.bounds.h + obj.margin[1] + obj.margin[3] + parent.spacing;
             } else {
-                obj.bounds = Rect(current.x + obj.margin[0], current.y + obj.margin[1], obj.bounds.w, current.h - obj.margin[1] - obj.margin[3]);
+                obj.bounds = Rect(current.x + obj.margin[0], current.y + obj.margin[1], current.w - obj.margin[0] - obj.margin[2], current.h - obj.margin[1] - obj.margin[3]);
                 current.x += obj.bounds.w + obj.margin[0] + obj.margin[2] + parent.spacing;
             }
             
@@ -206,18 +206,16 @@ class GUIManager {
     }
 
     void update(float dt) {
+        auto s = profiler ? profiler.section("GUI_Update") : ProfileScope.init;
         foreach (obj; objects) {
-            if (obj.enabled) {
-                obj.update(dt);
-            }
+            if (obj.enabled) obj.update(dt);
         }
     }
 
-    void draw(Surface dest) {
+    void draw(Surface surface) {
+        auto s = profiler ? profiler.section("GUI_Draw") : ProfileScope.init;
         foreach (obj; objects) {
-            if (obj.visible) {
-                obj.draw(dest);
-            }
+            if (obj.visible) obj.draw(surface);
         }
     }
 

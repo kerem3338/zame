@@ -4,6 +4,7 @@ import zame.core.graphics;
 import zame.core.common;
 import zame.core.platform;
 import zame.core.font;
+import zame.core.profiler;
 import std.conv;
 import std.string : chop;
 import std.algorithm : min, max, sort, endsWith;
@@ -435,28 +436,22 @@ class KeyValueEditor : GUISurface {
     this(Rect bounds, Font font) {
         super(bounds);
         this.font = font;
-        this.layoutType = LayoutType.Manual; // We manage layout manually
+        this.layoutType = LayoutType.Manual;
         this.padding = [5, 5, 5, 5];
         
-        // Initialize container
         contentContainer = new GUISurface(Rect(bounds.x, bounds.y, bounds.w - scrollBarWidth, bounds.h));
         contentContainer.color = Colors.transparent;
-        contentContainer.layoutType = LayoutType.Manual; // We position rows manually in refresh
+        contentContainer.layoutType = LayoutType.Manual;
     }
 
     void setData(string[string] newData) {
-        import std.stdio : writeln;
-        
-        // Use a copy to avoid external modification issues
         string[string] copy;
         foreach(k, v; newData) copy[k] = v;
         
         if (this.data == copy) {
-            writeln("[KV_DEBUG] setData: Data identical to current, skipping refresh.");
             return;
         }
 
-        writeln("[KV_DEBUG] setData called. Current items: ", data.length, " -> New items: ", copy.length);
         this.data = copy;
         refresh();
     }
@@ -483,17 +478,13 @@ class KeyValueEditor : GUISurface {
     }
 
     void refresh() {
-        import std.stdio : writeln;
         if (isRefreshing) {
-            writeln("[KV_AUDIT] RECURSION PREVENTED in refresh()");
             return;
         }
         isRefreshing = true;
         scope(exit) isRefreshing = false;
 
-        writeln("[KV_AUDIT] REFRESHING UI. Current items: ", data.length);
         
-        // Commit any pending edit in focused child BEFORE clearing children list
         if (manager !is null && manager.focusedObject !is null) {
             auto obj = manager.focusedObject;
             bool isOurChild = false;
@@ -506,7 +497,6 @@ class KeyValueEditor : GUISurface {
             if (isOurChild) {
                 if (auto ti = cast(TextInput)obj) {
                     if (ti.onSubmit && ti.text != ti.lastSubmittedText) {
-                        writeln("[KV_AUDIT] COMMITTING FOCUSED FIELD BEFORE REBUILD: '", ti.text, "'");
                         ti.lastSubmittedText = ti.text; 
                         ti.onSubmit(ti.text);
                     }
@@ -542,16 +532,13 @@ class KeyValueEditor : GUISurface {
             keyInput.setParent(row);
             keyInput.onSubmit = (val) {
                 string newK = val.to!string;
-                writeln("[KV_AUDIT][obj:", id, "][row:", currentKey, "] RENAME REQUEST: '", currentKey, "' -> '", newK, "'");
                 
                 if (newK.length > 0 && newK != currentKey) {
                     if (newK in data) {
-                        writeln("[KV_AUDIT][obj:", id, "] RENAME FAILED: Collision with '", newK, "'");
                         keyInput.text = currentKey.to!dstring;
                         return; 
                     }
                     
-                    writeln("[KV_AUDIT][obj:", id, "] TRANSACTION: Rename '", currentKey, "' to '", newK, "'");
                     string v = data[currentKey];
                     data.remove(currentKey);
                     data[newK] = v;
@@ -565,7 +552,6 @@ class KeyValueEditor : GUISurface {
                     pendingFocusIsValue = false; 
                     refresh();
                 } else if (newK.length == 0) {
-                    writeln("[KV_AUDIT][obj:", id, "] RENAME FAILED: Empty key not allowed. Reverting.");
                     keyInput.text = currentKey.to!dstring;
                     keyInput.lastSubmittedText = currentKey.to!dstring;
                 }
@@ -586,7 +572,6 @@ class KeyValueEditor : GUISurface {
             valInput.setParent(row);
             valInput.onSubmit = (val) {
                 string newV = val.to!string;
-                writeln("[KV_AUDIT][obj:", id, "][row:", currentKey, "] VALUE CHANGE: '", currentValue, "' -> '", newV, "'");
                 
                 if (currentKey in data) {
                     if (data[currentKey] != newV) {
@@ -598,7 +583,6 @@ class KeyValueEditor : GUISurface {
                         }
                     }
                 } else {
-                    writeln("[KV_AUDIT][obj:", id, "] ERROR: Key vanished while editing value: ", currentKey);
                 }
             };
             valInput.bounds.w = (row.bounds.w - 30) / 2;
@@ -613,7 +597,6 @@ class KeyValueEditor : GUISurface {
             row.addChild(valInput);
             
             auto btnDel = new Button("X"d, { 
-                writeln("[KV_AUDIT][obj:", id, "][row:", currentKey, "] DELETE clicked");
                 if (currentKey in data) {
                     data.remove(currentKey); 
                     if (onChanged) {
@@ -638,7 +621,6 @@ class KeyValueEditor : GUISurface {
         }
         
         auto btnAdd = new Button("Add Property"d, { 
-            writeln("[KV_AUDIT] ADDING NEW PROPERTY ROW");
             string base = "new_prop";
             string candidate = base;
             int counter = 1;
@@ -647,7 +629,6 @@ class KeyValueEditor : GUISurface {
                 counter++;
             }
             data[candidate] = "value";
-            writeln("[KV_AUDIT] TRANSACTION: Added '", candidate, "'");
             pendingFocusKey = candidate;
             pendingFocusIsValue = false;
             if (onChanged) {
@@ -666,7 +647,6 @@ class KeyValueEditor : GUISurface {
         contentContainer.bounds.w = bounds.w - scrollBarWidth;
         this.children = [contentContainer];
         updateScrollPosition();
-        writeln("[KV_AUDIT] UI REBUILD COMPLETE.");
     }
     
     override void performLayout(Rect area) {
@@ -881,7 +861,7 @@ class TextInput : GUIObject {
 	this() {
 		super();
 		this.focusable = true;
-		this.bounds = Rect(0, 0, 200, 30); // Default size
+		this.bounds = Rect(0, 0, 200, 30);
         this.lastSubmittedText = text;
 	}
 	
@@ -913,16 +893,11 @@ class TextInput : GUIObject {
 	}
 
     override void onFocusGained() {
-        import std.stdio : writeln;
-        writeln("[TI_DEBUG][obj:", id, "] Gained focus hook: '", text, "'");
         resetCursorBlink();
     }
 
     override void onFocusLost() {
-        import std.stdio : writeln;
-        writeln("[TI_DEBUG][obj:", id, "] Lost focus hook: '", text, "' (last: '", lastSubmittedText, "')");
         if (onSubmit && text != lastSubmittedText) {
-            writeln("[TI_DEBUG][obj:", id, "] Auto-submitting on focus loss: '", text, "'");
             lastSubmittedText = text;
             onSubmit(text);
         }
@@ -950,15 +925,13 @@ class TextInput : GUIObject {
             if (focused) {
                 if (manager !is null) manager.setFocus(this);
                 if (font !is null) {
-                    // Calculate cursor position from mouse click
                     int padding = 5;
-                    int fontSize = bounds.h - padding * 2; // Must match draw logic
+                    int fontSize = bounds.h - padding * 2;
                     int relativeX = event.mouse.x - bounds.x - padding + scrollX;
                     
                     int bestCursor = 0;
                     int minDist = int.max;
                     
-                    // Brute force check all cursor positions to find closest
                     for(int i = 0; i <= text.length; i++) {
                         string sub = to!string(text[0..i]);
                         Size sz = font.getSize(sub, fontSize);
@@ -970,7 +943,7 @@ class TextInput : GUIObject {
                     }
                     
                     cursorPos = bestCursor;
-                    selectionAnchor = cursorPos; // Reset selection on click
+                    selectionAnchor = cursorPos;
                     resetCursorBlink();
                 }
                 return true;
@@ -1023,8 +996,6 @@ class TextInput : GUIObject {
 						deleteSelection();
 						resetCursorBlink();
 						notifyChanged();
-                        import std.stdio : writeln;
-                        writeln("[TI_DEBUG] Cut text: '", text, "'");
 					}
 				} else if (code == KeyCode.A) {
 					selectionAnchor = 0;
@@ -1032,13 +1003,11 @@ class TextInput : GUIObject {
 					resetCursorBlink();
 				}
 			} else if (code == KeyCode.Enter || code == KeyCode.Escape) {
-                import std.stdio : writeln;
-                writeln("[TI_DEBUG] Enter/Esc pressed: '", text, "'");
                 if (onSubmit && text != lastSubmittedText) {
                     lastSubmittedText = text;
                     onSubmit(text);
                 }
-                focused = false; // Relinquish focus
+                focused = false;
                 if (manager !is null) manager.setFocus(null);
             }
             else {
@@ -1147,7 +1116,6 @@ class TextInput : GUIObject {
 			scrollX = cursorXRel - (contentW - 2);
 		}
 
-		// Save previous clip
         bool wasClipping = surface.isClipping();
         Rect oldClip = surface.getClipRect();
         
@@ -2038,4 +2006,491 @@ class GUIMessageBox : GUIWindow {
 		if (vScroll !is null && vScroll.visible) vScroll.draw(surface);
 		if (hScroll !is null && hScroll.visible) hScroll.draw(surface);
 	}
+}
+
+class TextArea : GUIObject {
+    dstring[] lines = [""d];
+    int cursorLine = 0;
+    int cursorCol = 0;
+    int selectionAnchorLine = 0;
+    int selectionAnchorCol = 0;
+    bool isDragging = false;
+    
+    Font font;
+    int fontSize = 16;
+    Color textColor = Colors.white;
+    Color bgColor = Color(0, 0, 0, 180);
+    Color borderColor = Color(100, 100, 100);
+    Color focusColor = Colors.yellow;
+    
+    Scrollbar vScroll;
+    Surface[] lineCache = [null];
+    Color lastCachedColor;
+    int lastCachedFontSize;
+    
+    Surface backBuffer;
+    bool isDirty = true;
+
+    void markDirty() { isDirty = true; }
+    
+    this() {
+        super();
+        this.focusable = true;
+        this.bounds = Rect(0, 0, 300, 200);
+        vScroll = new Scrollbar(Rect(0, 0, 15, 200));
+    }
+
+    override void setManager(GUIManager m) {
+        super.setManager(m);
+        if (vScroll !is null) vScroll.setManager(m);
+        updateScrollbar();
+        markDirty();
+    }
+
+    private void deleteSelection() {
+        if (selectionAnchorLine == cursorLine && selectionAnchorCol == cursorCol) return;
+        
+        int startLine = selectionAnchorLine;
+        int startCol = selectionAnchorCol;
+        int endLine = cursorLine;
+        int endCol = cursorCol;
+        
+        if (startLine > endLine || (startLine == endLine && startCol > endCol)) {
+            startLine = cursorLine;
+            startCol = cursorCol;
+            endLine = selectionAnchorLine;
+            endCol = selectionAnchorCol;
+        }
+        
+        if (startLine == endLine) {
+            lines[startLine] = lines[startLine][0 .. startCol] ~ lines[startLine][endCol .. $];
+            if (startLine < lineCache.length) lineCache[startLine] = null;
+        } else {
+            lines[startLine] = lines[startLine][0 .. startCol] ~ lines[endLine][endCol .. $];
+            lines = lines[0 .. startLine + 1] ~ lines[endLine + 1 .. $];
+            
+            if (startLine < lineCache.length) lineCache[startLine] = null;
+            import std.algorithm : remove;
+            if (startLine + 1 < lineCache.length) {
+                lineCache = lineCache[0 .. startLine + 1] ~ lineCache[min(cast(int)lineCache.length, endLine + 1) .. $];
+            }
+        }
+        
+        cursorLine = startLine;
+        cursorCol = startCol;
+        selectionAnchorLine = startLine;
+        selectionAnchorCol = startCol;
+        updateScrollbar();
+        markDirty();
+    }
+
+    dstring getSelectedText() {
+        if (selectionAnchorLine == cursorLine && selectionAnchorCol == cursorCol) return ""d;
+        
+        int s1L = selectionAnchorLine, s1C = selectionAnchorCol;
+        int s2L = cursorLine, s2C = cursorCol;
+        if (s1L > s2L || (s1L == s2L && s1C > s2C)) { s1L = cursorLine; s1C = cursorCol; s2L = selectionAnchorLine; s2C = selectionAnchorCol; }
+        
+        dstring res = ""d;
+        if (s1L == s2L) {
+            res = lines[s1L][s1C .. s2C];
+        } else {
+            res ~= lines[s1L][s1C .. $] ~ "\n"d;
+            for (int i = s1L + 1; i < s2L; i++) {
+                res ~= lines[i] ~ "\n"d;
+            }
+            res ~= lines[s2L][0 .. s2C];
+        }
+        return res;
+    }
+
+    void ensureCursorVisible() {
+        int lineH = fontSize + 4;
+        int viewH = bounds.h - 10;
+        int totalH = cast(int)lines.length * lineH;
+        
+        int cursorY = cursorLine * lineH;
+        int scrollY = vScroll.visible ? cast(int)(vScroll.value * max(0, totalH - viewH)) : 0;
+        
+        if (cursorY < scrollY) {
+            scrollY = cursorY;
+        } else if (cursorY + lineH > scrollY + viewH) {
+            scrollY = cursorY + lineH - viewH;
+        } else {
+            return; // Already visible
+        }
+        
+        if (vScroll.visible) {
+            vScroll.value = cast(float)scrollY / max(1, totalH - viewH);
+            vScroll.value = max(0.0f, min(1.0f, vScroll.value));
+        }
+        markDirty();
+    }
+
+    void setText(dstring text) {
+        import std.string : splitLines;
+        import std.array : split, array;
+        import std.algorithm : map;
+        lines = text.to!string.splitLines.map!(s => s.to!dstring).array;
+        if (lines.length == 0) lines = [""d];
+        
+        lineCache.length = lines.length;
+        foreach (ref s; lineCache) s = null;
+        
+        cursorLine = 0;
+        cursorCol = 0;
+        selectionAnchorLine = 0;
+        selectionAnchorCol = 0;
+        updateScrollbar();
+        markDirty();
+    }
+
+    dstring getText() {
+        dstring res = ""d;
+        foreach (i, line; lines) {
+            res ~= line;
+            if (i < lines.length - 1) res ~= "\n"d;
+        }
+        return res;
+    }
+
+    private void updateScrollbar() {
+        int totalHeight = cast(int)lines.length * (fontSize + 4);
+        int viewHeight = bounds.h - 10;
+        if (totalHeight > viewHeight) {
+            vScroll.visible = true;
+            vScroll.thumbSize = cast(float)viewHeight / totalHeight;
+            vScroll.bounds = Rect(bounds.x + bounds.w - 15, bounds.y + 5, 15, bounds.h - 10);
+        } else {
+            vScroll.visible = false;
+            vScroll.value = 0;
+        }
+        markDirty();
+    }
+
+    override void update(float dt) {
+        if (vScroll.visible) vScroll.update(dt);
+    }
+
+    override bool handleInput(Event event) {
+        if (!enabled || !visible) return false;
+        
+        if (vScroll.visible && vScroll.handleInput(event)) {
+             markDirty();
+             return true;
+        }
+
+        if (event.type == EventType.mouseButtonReleased && event.mouse.button == MouseEvent.ButtonType.left) {
+            isDragging = false;
+        }
+
+        if (event.type == EventType.mouseMoved && isDragging) {
+            int totalHeight = cast(int)lines.length * (fontSize + 4);
+            int viewHeight = bounds.h - 10;
+            int scrollY = vScroll.visible ? cast(int)(vScroll.value * max(0, totalHeight - viewHeight)) : 0;
+            
+            int ly = (event.mouseMoved.y - bounds.y - 5 + scrollY) / (fontSize + 4);
+            cursorLine = max(0, min(cast(int)lines.length - 1, ly));
+            
+            int tx = event.mouseMoved.x - bounds.x - 5;
+            cursorCol = 0;
+            if (font !is null) {
+                dstring line = lines[cursorLine];
+                int bestDist = abs(tx);
+                for (int i = 1; i <= line.length; i++) {
+                    int w = font.getSize(to!string(line[0 .. i]), fontSize).w;
+                    int dist = abs(tx - w);
+                    if (dist < bestDist) {
+                        bestDist = dist;
+                        cursorCol = i;
+                    } else break;
+                }
+            }
+            ensureCursorVisible();
+            markDirty();
+            return true;
+        }
+
+        if (event.type == EventType.mouseButtonPressed && event.mouse.button == MouseEvent.ButtonType.left) {
+            if (bounds.contains(Point(event.mouse.x, event.mouse.y))) {
+                focus();
+                isDragging = true;
+                
+                int totalHeight = cast(int)lines.length * (fontSize + 4);
+                int viewHeight = bounds.h - 10;
+                int scrollY = vScroll.visible ? cast(int)(vScroll.value * max(0, totalHeight - viewHeight)) : 0;
+                
+                int ly = (event.mouse.y - bounds.y - 5 + scrollY) / (fontSize + 4);
+                cursorLine = max(0, min(cast(int)lines.length - 1, ly));
+                
+                int tx = event.mouse.x - bounds.x - 5;
+                cursorCol = 0;
+                if (font !is null) {
+                    dstring line = lines[cursorLine];
+                    int bestDist = abs(tx);
+                    for (int i = 1; i <= line.length; i++) {
+                        int w = font.getSize(to!string(line[0 .. i]), fontSize).w;
+                        int dist = abs(tx - w);
+                        if (dist < bestDist) {
+                            bestDist = dist;
+                            cursorCol = i;
+                        } else break;
+                    }
+                }
+                
+                bool shiftPressed = false;
+                version(Windows) {
+                    import core.sys.windows.windows;
+                    shiftPressed = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+                }
+                
+                if (!shiftPressed) {
+                    selectionAnchorLine = cursorLine;
+                    selectionAnchorCol = cursorCol;
+                }
+                ensureCursorVisible();
+                markDirty();
+                return true;
+            }
+        }
+
+        if (!focused) return false;
+
+        if (event.type == EventType.keyPressed) {
+            auto code = event.key.code;
+            bool ctrl = (event.key.mods & Modifiers.Ctrl) != 0;
+            bool shift = (event.key.mods & Modifiers.Shift) != 0;
+
+            if (ctrl) {
+                if (code == KeyCode.A) {
+                    selectionAnchorLine = 0;
+                    selectionAnchorCol = 0;
+                    cursorLine = cast(int)lines.length - 1;
+                    cursorCol = cast(int)lines[cursorLine].length;
+                    markDirty();
+                    return true;
+                } else if (code == KeyCode.C) {
+                    if (event.window !is null && event.window.platform !is null) {
+                        dstring sel = getSelectedText();
+                        if (sel.length > 0) event.window.platform.setClipboard(sel.to!string);
+                    }
+                    return true;
+                } else if (code == KeyCode.V) {
+                    if (event.window !is null && event.window.platform !is null) {
+                        deleteSelection();
+                        dstring pasteText = event.window.platform.getClipboard().to!dstring;
+                        foreach (dchar c; pasteText) {
+                            if (c == '\n') {
+                                dstring current = lines[cursorLine];
+                                lines[cursorLine] = current[0 .. cursorCol];
+                                import std.array : insertInPlace;
+                                insertInPlace(lines, cursorLine + 1, current[cursorCol .. $]);
+                                
+                                if (cursorLine < lineCache.length) lineCache[cursorLine] = null;
+                                insertInPlace(lineCache, cursorLine + 1, cast(Surface)null);
+                                
+                                cursorLine++;
+                                cursorCol = 0;
+                            } else if (c >= 32) {
+                                lines[cursorLine] = lines[cursorLine][0 .. cursorCol] ~ c ~ lines[cursorLine][cursorCol .. $];
+                                if (cursorLine < lineCache.length) lineCache[cursorLine] = null;
+                                cursorCol++;
+                            }
+                        }
+                        selectionAnchorLine = cursorLine;
+                        selectionAnchorCol = cursorCol;
+                        updateScrollbar();
+                        ensureCursorVisible();
+                    }
+                    markDirty();
+                    return true;
+                }
+            }
+
+            if (code == KeyCode.Enter) {
+                deleteSelection();
+                dstring current = lines[cursorLine];
+                lines[cursorLine] = current[0 .. cursorCol];
+                import std.array : insertInPlace;
+                insertInPlace(lines, cursorLine + 1, current[cursorCol .. $]);
+                
+                if (cursorLine < lineCache.length) lineCache[cursorLine] = null;
+                insertInPlace(lineCache, cursorLine + 1, cast(Surface)null);
+                
+                cursorLine++;
+                cursorCol = 0;
+                selectionAnchorLine = cursorLine;
+                selectionAnchorCol = cursorCol;
+                updateScrollbar();
+                markDirty();
+                return true;
+            } else if (code == KeyCode.Backspace) {
+                if (selectionAnchorLine != cursorLine || selectionAnchorCol != cursorCol) {
+                    deleteSelection();
+                } else if (cursorCol > 0) {
+                    lines[cursorLine] = lines[cursorLine][0 .. cursorCol - 1] ~ lines[cursorLine][cursorCol .. $];
+                    if (cursorLine < lineCache.length) lineCache[cursorLine] = null;
+                    cursorCol--;
+                } else if (cursorLine > 0) {
+                    cursorCol = cast(int)lines[cursorLine - 1].length;
+                    lines[cursorLine - 1] ~= lines[cursorLine];
+                    import std.algorithm : remove;
+                    lines = lines.remove(cursorLine);
+                    if (cursorLine - 1 < lineCache.length) lineCache[cursorLine - 1] = null;
+                    if (cursorLine < lineCache.length) lineCache = lineCache[0 .. cursorLine] ~ lineCache[cursorLine + 1 .. $];
+                    cursorLine--;
+                }
+                selectionAnchorLine = cursorLine;
+                selectionAnchorCol = cursorCol;
+                updateScrollbar();
+                markDirty();
+                return true;
+            } else if (code == KeyCode.Delete) {
+                if (selectionAnchorLine != cursorLine || selectionAnchorCol != cursorCol) {
+                    deleteSelection();
+                } else if (cursorCol < lines[cursorLine].length) {
+                    lines[cursorLine] = lines[cursorLine][0 .. cursorCol] ~ lines[cursorLine][cursorCol + 1 .. $];
+                    if (cursorLine < lineCache.length) lineCache[cursorLine] = null;
+                } else if (cursorLine < lines.length - 1) {
+                    lines[cursorLine] ~= lines[cursorLine + 1];
+                    import std.algorithm : remove;
+                    lines = lines.remove(cursorLine + 1);
+                    if (cursorLine < lineCache.length) lineCache[cursorLine] = null;
+                    if (cursorLine + 1 < lineCache.length) lineCache = lineCache[0 .. cursorLine + 1] ~ lineCache[cursorLine + 2 .. $];
+                }
+                selectionAnchorLine = cursorLine;
+                selectionAnchorCol = cursorCol;
+                updateScrollbar();
+                markDirty();
+                return true;
+            } else if (code == KeyCode.ArrowUp) {
+                if (cursorLine > 0) { cursorLine--; if (cursorCol > lines[cursorLine].length) cursorCol = cast(int)lines[cursorLine].length; }
+                if (!shift) { selectionAnchorLine = cursorLine; selectionAnchorCol = cursorCol; }
+                ensureCursorVisible();
+                markDirty();
+            } else if (code == KeyCode.ArrowDown) {
+                if (cursorLine < lines.length - 1) { cursorLine++; if (cursorCol > lines[cursorLine].length) cursorCol = cast(int)lines[cursorLine].length; }
+                if (!shift) { selectionAnchorLine = cursorLine; selectionAnchorCol = cursorCol; }
+                ensureCursorVisible();
+                markDirty();
+            } else if (code == KeyCode.ArrowLeft) {
+                if (cursorCol > 0) cursorCol--;
+                else if (cursorLine > 0) { cursorLine--; cursorCol = cast(int)lines[cursorLine].length; }
+                if (!shift) { selectionAnchorLine = cursorLine; selectionAnchorCol = cursorCol; }
+                ensureCursorVisible();
+                markDirty();
+            } else if (code == KeyCode.ArrowRight) {
+                if (cursorCol < lines[cursorLine].length) cursorCol++;
+                else if (cursorLine < lines.length - 1) { cursorLine++; cursorCol = 0; }
+                if (!shift) { selectionAnchorLine = cursorLine; selectionAnchorCol = cursorCol; }
+                ensureCursorVisible();
+                markDirty();
+            } else if (code == KeyCode.Home) {
+                cursorCol = 0;
+                if (!shift) { selectionAnchorLine = cursorLine; selectionAnchorCol = cursorCol; }
+                ensureCursorVisible();
+                markDirty();
+            } else if (code == KeyCode.End) {
+                cursorCol = cast(int)lines[cursorLine].length;
+                if (!shift) { selectionAnchorLine = cursorLine; selectionAnchorCol = cursorCol; }
+                ensureCursorVisible();
+                markDirty();
+            }
+        } else if (event.type == EventType.textInput) {
+            dchar c = event.textInput.character;
+            if (c >= 32) {
+                deleteSelection();
+                lines[cursorLine] = lines[cursorLine][0 .. cursorCol] ~ c ~ lines[cursorLine][cursorCol .. $];
+                if (cursorLine < lineCache.length) lineCache[cursorLine] = null;
+                cursorCol++;
+                selectionAnchorLine = cursorLine;
+                selectionAnchorCol = cursorCol;
+                markDirty();
+                return true;
+            }
+        }
+        return false;
+    }
+
+    override void draw(Surface surface) {
+        auto ps = manager && manager.profiler ? manager.profiler.section("TextArea_Draw") : ProfileScope.init;
+        
+        if (backBuffer is null || backBuffer.width != bounds.w || backBuffer.height != bounds.h) {
+            backBuffer = new Surface(bounds.w, bounds.h);
+            isDirty = true;
+        }
+
+        if (isDirty) {
+            renderToBackBuffer();
+            isDirty = false;
+        }
+
+        surface.blit(backBuffer, bounds.x, bounds.y, false); // Speedy memcpy blit
+    }
+
+    private void renderToBackBuffer() {
+        backBuffer.fill(bgColor);
+        
+        Color border = focused ? focusColor : borderColor;
+        Graphics.drawRect(backBuffer, border, Rect(0, 0, bounds.w, 1));
+        Graphics.drawRect(backBuffer, border, Rect(0, bounds.h - 1, bounds.w, 1));
+        Graphics.drawRect(backBuffer, border, Rect(0, 0, 1, bounds.h));
+        Graphics.drawRect(backBuffer, border, Rect(bounds.w - 1, 0, 1, bounds.h));
+
+        if (font is null) return;
+
+        backBuffer.setClip(Rect(5, 5, bounds.w - 20, bounds.h - 10));
+        
+        int totalHeight = cast(int)lines.length * (fontSize + 4);
+        int viewHeight = bounds.h - 10;
+        int scrollY = vScroll.visible ? cast(int)(vScroll.value * max(0, totalHeight - viewHeight)) : 0;
+        int ty = 5 - scrollY;
+        
+        int s1L = selectionAnchorLine, s1C = selectionAnchorCol;
+        int s2L = cursorLine, s2C = cursorCol;
+        if (s1L > s2L || (s1L == s2L && s1C > s2C)) { s1L = cursorLine; s1C = cursorCol; s2L = selectionAnchorLine; s2C = selectionAnchorCol; }
+        bool hasSelection = (s1L != s2L || s1C != s2C);
+
+        // Wipe line cache if style changed
+        if (textColor != lastCachedColor || fontSize != lastCachedFontSize) {
+            foreach (ref cs; lineCache) cs = null;
+            lastCachedColor = textColor;
+            lastCachedFontSize = fontSize;
+        }
+
+        foreach (i, line; lines) {
+            int lineIdx = cast(int)i;
+            int lineY = ty;
+            ty += fontSize + 4;
+
+            if (lineY + fontSize + 4 < 0) continue;
+            if (lineY > bounds.h) break;
+
+            if (hasSelection && lineIdx >= s1L && lineIdx <= s2L) {
+                int start = (lineIdx == s1L) ? s1C : 0;
+                int end = (lineIdx == s2L) ? s2C : cast(int)line.length;
+                int x1 = 5; if (start > 0) x1 += font.getSize(to!string(line[0 .. start]), fontSize).w;
+                int x2 = 5; if (end > 0) x2 += font.getSize(to!string(line[0 .. end]), fontSize).w;
+                Graphics.drawRect(backBuffer, Color(0, 120, 215, 128), Rect(x1, lineY, max(2, x2 - x1), fontSize + 2));
+            }
+
+            if (line.length > 0) {
+                if (lineIdx >= lineCache.length) lineCache.length = lineIdx + 1;
+                if (lineCache[lineIdx] is null) lineCache[lineIdx] = font.getText(to!string(line), textColor, fontSize);
+                backBuffer.blit(lineCache[lineIdx], 5, lineY);
+            }
+            
+            if (lineIdx == cursorLine && focused) {
+                int cx = 5; if (cursorCol > 0) cx += font.getSize(to!string(line[0 .. cursorCol]), fontSize).w;
+                Graphics.drawRect(backBuffer, textColor, Rect(cx, lineY, 2, fontSize));
+            }
+        }
+        backBuffer.resetClip();
+        if (vScroll.visible) {
+            Rect oldB = vScroll.bounds;
+            vScroll.bounds = Rect(bounds.w - 15, 5, 15, bounds.h - 10);
+            vScroll.draw(backBuffer);
+            vScroll.bounds = oldB;
+        }
+    }
 }

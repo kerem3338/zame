@@ -112,7 +112,6 @@ class BitmapFont : Font {
 		if (text.length == 0)
 			return Size(0, 0);
 
-		// native width
 		int nativeW = 0;
 		foreach (dchar c; text) {
 			auto g = (c in glyphs) ? glyphs[c] : glyphs['?'];
@@ -124,7 +123,6 @@ class BitmapFont : Font {
 		int scaledW = cast(int)(nativeW * scale);
 		int scaledH = fontSize;
 
-		// spacing
 		int count = text.length.to!int;
 		if (count > 1) {
 			int spacing = cast(int)(widthSpacing * scale);
@@ -206,7 +204,6 @@ class BitmapFont : Font {
 		Color currentColor = Colors.white;
 		string currentText = "";
 		
-		// Optimize color lookups
 		static Color[string] colorMap;
 		if (colorMap.length == 0) {
 			import std.traits : EnumMembers;

@@ -10,6 +10,7 @@ import std.variant;
 import std.array : replicate;
 
 import zame;
+import zame.core.profiler;
 
 version (Windows) {
 	import core.sys.windows.windows;
@@ -148,12 +149,15 @@ class Window {
     string iconPath;
 	IPlatform platform;
 	Window parent;
+	UISystem ui;
 
 	this(uint width, uint height, string title="Zame Engine") {
 		this.width = width;
 		this.height = height;
 		surface = new Surface(width, height);
 		this.title = title;
+		this.ui = new UISystem(1920, 1080);
+		this.ui.updateSize(width, height);
 	}
 
 	int createWindow() {
@@ -165,10 +169,15 @@ class Window {
         this.width = width;
         this.height = height;
         this.surface = new Surface(width, height);
+        if (this.ui !is null) this.ui.updateSize(width, height);
     }
 
     Size size() {
     	return Size(width, height);
+    }
+
+    Rect rect() {
+    	return Rect(0, 0, width, height);
     }
 }
 
@@ -178,6 +187,7 @@ class Instance {
 	Event[] eventQueue;
 	IPlatform platform;
 	Logger logger;
+    Profiler profiler;
     IAudioDevice audio;
     SoundManager soundManager;
     int mouseX, mouseY;
@@ -205,6 +215,7 @@ class Instance {
 	}
 
 	Event[] pollEvents() {
+        auto s = profiler ? profiler.section("Event_Poll") : ProfileScope.init;
 		auto events = eventQueue.dup;
 		eventQueue.length = 0;
 		return events;

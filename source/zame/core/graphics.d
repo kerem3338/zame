@@ -61,6 +61,11 @@ class Surface {
 		data[where.y * this.width + where.x] = color;
 	}
 
+	void setPixelIndex(uint whereIndex, Color color) {
+		if (whereIndex > data.length) return;
+		data[whereIndex] = color;
+	}
+
 	void setClip(Rect rect) {
 		clipRect = rect;
 		useClip = true;
@@ -217,6 +222,7 @@ class Surface {
 	Point corner1() {return Point(width,0);}
 	Point corner2() {return Point(0,height);}
 	Point corner3() {return Point(width, height);}
+	Size size() { return Size(width, height); }
 
 	override string  toString() const {
 		return "Surface<"~this.width.to!string~"x"~this.height.to!string~">";
@@ -315,7 +321,6 @@ struct Graphics {
 		int dx = p1.x - p0.x;
 		int dy = p1.y - p0.y;
 
-        import std.math : isNaN;
         if (isNaN(cast(float)dx) || isNaN(cast(float)dy)) return;
 
 		int steps = abs(dx) > abs(dy) ? abs(dx) : abs(dy);
@@ -425,11 +430,28 @@ struct Graphics {
 				line[0 .. width] = color;
 			}
 		} else if (color.a > 0) {
+			uint a  = color.a;
+			uint ia = 255 - a;
+			uint sr = color.r * a;
+			uint sg = color.g * a;
+			uint sb = color.b * a;
+
+			// Per-channel LUT: precomputed blend for all 256 possible dst values.
+			// 768 bytes total — fits entirely in L1 cache.
+			// Replaces 3 multiplications + 3 shifts per pixel with 3 table lookups.
+			ubyte[256] rLUT = void, gLUT = void, bLUT = void;
+			foreach (i; 0 .. 256) {
+				rLUT[i] = cast(ubyte)((sr + i * ia) * 257 >> 16);
+				gLUT[i] = cast(ubyte)((sg + i * ia) * 257 >> 16);
+				bLUT[i] = cast(ubyte)((sb + i * ia) * 257 >> 16);
+			}
+
 			for (int y = y0; y < y1; y++) {
 				Color* line = &surface.data[y * surface.width + x0];
-				int width = x1 - x0;
+				int width   = x1 - x0;
 				for (int x = 0; x < width; x++) {
-					line[x] = alphaBlend(color, line[x]);
+					Color d = line[x];
+					line[x] = Color(rLUT[d.r], gLUT[d.g], bLUT[d.b], 255);
 				}
 			}
 		}
@@ -526,15 +548,13 @@ static Color alphaBlend(Color src, Color dst) {
     uint a = src.a;
     uint ia = 255 - a;
 
-    // More accurate integer alpha blending: (src * a + dst * (255 - a)) / 255
-    ubyte r = cast(ubyte)((src.r * a + dst.r * ia) / 255);
-    ubyte g = cast(ubyte)((src.g * a + dst.g * ia) / 255);
-    ubyte b = cast(ubyte)((src.b * a + dst.b * ia) / 255);
-    
-    // Alpha composite: src.a + dst.a * (255 - src.a) / 255
-    ubyte outA = cast(ubyte)(src.a + ((dst.a * ia) / 255));
-
-    return Color(r, g, b, outA);
+    // Fast approximation: (x * 257) >> 16 ≈ x / 255, avoids integer division
+    return Color(
+        cast(ubyte)((src.r * a + dst.r * ia) * 257 >> 16),
+        cast(ubyte)((src.g * a + dst.g * ia) * 257 >> 16),
+        cast(ubyte)((src.b * a + dst.b * ia) * 257 >> 16),
+        cast(ubyte)(src.a + ((dst.a * ia) * 257 >> 16))
+    );
 }
 
 /++
@@ -678,8 +698,6 @@ ResultStatus loadFromPng(ref Surface dest, string filePath)
 }
 
 Surface rotateSurface(Surface src, float angleRadians) {
-	import std.math : sin, cos, abs, PI;
-	
 	float cosA = cos(angleRadians);
 	float sinA = sin(angleRadians);
 	
@@ -733,16 +751,12 @@ Surface rotateSurface(Surface src, float angleRadians) {
 }
 
 void blitRotated(Surface dest, Surface src, int destX, int destY, float angleRadians) {
-    import std.math : sin, cos, abs;
-    
     float cosA = cos(angleRadians);
     float sinA = sin(angleRadians);
     
-    // Half dimensions
     float hw = src.width / 2.0f;
     float hh = src.height / 2.0f;
     
-    // Calculate bounding box on destination
     float x1 = -hw * cosA - (-hh) * sinA;
     float y1 = -hw * sinA + (-hh) * cosA;
     float x2 = hw * cosA - (-hh) * sinA;
@@ -758,7 +772,6 @@ void blitRotated(Surface dest, Surface src, int destX, int destY, float angleRad
     int minY = cast(int)(min(min(y1, y2), min(y3, y4)));
     int maxY = cast(int)(max(max(y1, y2), max(y3, y4))) + 1;
     
-    // Clip to destination surface
     int startX = max(0, destX + minX);
     int endX = min(cast(int)dest.width, destX + maxX);
     int startY = max(0, destY + minY);

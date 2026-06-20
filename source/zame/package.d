@@ -40,6 +40,8 @@ public import zame.core.network;
 public import zame.core.math;
 public import zame.core.file;
 public import zame.core.gui.components;
+public import zame.core.profiler;
+public import zame.core.gui.ui;
 public import zame.core.cache;
 
 public import zame.translation;

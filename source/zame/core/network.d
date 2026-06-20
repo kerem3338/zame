@@ -145,7 +145,6 @@ class NetworkClient {
 			
 			if (reliable) {
 				if (state.pendingAcks.length >= MAX_PENDING_ACKS) {
-					// Drop oldest
 					uint oldestSeq = uint.max;
 					foreach (seq; state.pendingAcks.keys) {
 						if (seq < oldestSeq) oldestSeq = seq;
@@ -262,13 +261,11 @@ class NetworkClient {
 
 		// Send ACK if reliable
 		if (flags & 1) {
-			// Check if duplicate
 			if (!isDuplicate(sequence)) {
 				markReceived(sequence);
 				sendAck(sequence);
 				return NetworkPacket(type, senderId, data);
 			} else {
-				// Duplicate, still send ACK but don't process
 				sendAck(sequence);
 				return NetworkPacket();
 			}
@@ -278,9 +275,9 @@ class NetworkClient {
 	}
 
 	private bool isDuplicate(uint sequence) {
-		if (sequence < state.baseSequence) return true; // Too old
+		if (sequence < state.baseSequence) return true;
 		if (sequence >= state.baseSequence + SEQUENCE_WINDOW) {
-			// Advance window
+
 			uint shift = sequence - state.baseSequence - SEQUENCE_WINDOW + 1;
 			state.receivedSeqBitfield >>= shift;
 			state.baseSequence += shift;

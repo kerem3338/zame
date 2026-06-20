@@ -20,7 +20,7 @@ version(Windows) {
 			HWND hwnd;
 			HDC hdc;
 			Window windowRef;
-			uint[] tempBuffer; // Deprecated, but keeping for compatibility if needed elsewhere
+			uint[] tempBuffer;
 			Surface surfaceRef;
 		}
 
@@ -63,7 +63,7 @@ version(Windows) {
 			wc.lpszMenuName = null;
 			wc.lpszClassName = className;
 
-			RegisterClassW(&wc); // May fail if already registered, that's fine
+			RegisterClassW(&wc);
 
 			auto platformPtr = cast(void*)this;
 			
@@ -83,13 +83,16 @@ version(Windows) {
 				}
 			}
 
+			RECT windowRect = RECT(0, 0, window.width, window.height);
+			AdjustWindowRectEx(&windowRect, style, FALSE, 0);
+
 			HWND hwnd = CreateWindowExW(
 				0,
 				className,
 				windowName,
 				style,
 				CW_USEDEFAULT, CW_USEDEFAULT,
-				window.width, window.height,
+				windowRect.right - windowRect.left, windowRect.bottom - windowRect.top,
 				parentHwnd, null,
 				hInstance,
 				platformPtr
@@ -511,7 +514,7 @@ version(Windows) {
 				if (n > 0) {
 					import std.utf : toUTF32;
 					foreach (dchar c; buffer[0..n].toUTF32) {
-						if (c >= 32) { // Filter out control characters like \b, \r, \n
+						if (c >= 32) { // filter out non-printable control chars example: \b, \r, \n
 							TextInputEvent te;
 							te.character = c;
 							
@@ -714,7 +717,7 @@ version(Windows) {
                 return 0;
 
 			case WM_ERASEBKGND:
-				return 1; // Prevent background erasing to reduce flickering
+				return 1;
 
 			case WM_CLOSE:
 				DestroyWindow(hwnd);

@@ -21,6 +21,7 @@
   "copyright": "Copyright © 2025, zoda",
   "name": "zame",
   "description": "Zame Engine",
+  "targetType": "library",
   "dependencies": {
     "raylib-d": "~>5.5.3",
     "gamut": "~>3.3.5"
