@@ -1,3 +1,4 @@
+![Zame Engine Logo](resources/images/zame.png)
 # Zame Engine
 
 A small and basic game engine / game development framework written in D Programming Language.

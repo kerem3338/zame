@@ -6,6 +6,7 @@ import std.path;
 import std.file;
 
 string exeDir;
+
 class HelloWorldScene : Scene {
     BitmapFont font;
     Surface textSurface;
@@ -16,15 +17,15 @@ class HelloWorldScene : Scene {
     }
 
     override void start() {
-        writeln("Hello World Scene started");
+        instance.logger.info("Hello World Scene started");
     }
 
     override void stop() {
-        writeln("Hello World Scene stopped");
+        instance.logger.info("Hello World Scene stopped");
     }
 
     override void update(float dt) {
-        // Nothing to update
+
     }
 
     override void render(Surface surface) {
@@ -46,12 +47,13 @@ void main() {
     platform.instanceRef = instance;
 
     if (platform.createWindow(window) != 0) {
-        writeln("Failed to create window");
+        instance.logger.error("Failed to create window");
         return;
     }
 
     instance.doInitJobs();
-    
+    instance.logger.addHandler(new ConsoleHandler());
+
     auto sceneManager = new SceneManager(instance);
     sceneManager.changeScene(new HelloWorldScene());
 

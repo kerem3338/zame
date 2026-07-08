@@ -1,5 +1,5 @@
 /*
-   Copyright 2025 Kerem ATA
+   Copyright 2026 Kerem ATA
 
    Licensed under the Apache License, Version 2.0 (the "License");
    you may not use this file except in compliance with the License.
@@ -21,7 +21,7 @@ struct SemanticVersion {
    int patch;
 }
 
-enum string VERSION = "0.0.3";
+enum string VERSION = "0.0.4";
 enum string AUTHOR = "Kerem ATA (Zoda)";
 enum string LICENSE = "Apache-2.0";
 
@@ -43,5 +43,6 @@ public import zame.core.gui.components;
 public import zame.core.profiler;
 public import zame.core.gui.ui;
 public import zame.core.cache;
+public import zame.core.animation;
 
 public import zame.translation;

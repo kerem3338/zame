@@ -137,6 +137,10 @@ class RaylibPlatform : IPlatform {
 		if (!IsWindowReady())
 			return -1;
 
+		if (windowRef.settings.get("window_resizable", true)) {
+		    SetWindowState(ConfigFlags.FLAG_WINDOW_RESIZABLE);
+		}
+		
 		image = GenImageColor(
 			cast(int)surfaceRef.width,
 			cast(int)surfaceRef.height,
@@ -153,6 +157,17 @@ class RaylibPlatform : IPlatform {
 		return 0;
 	}
 
+	override bool updateWindowSettings() {
+		import raylib: ConfigFlags;
+		// check for resizing
+		if (windowRef.settings.get("window_resizable", true)) {
+		    SetWindowState(ConfigFlags.FLAG_WINDOW_RESIZABLE);
+		} else {
+		    ClearWindowState(ConfigFlags.FLAG_WINDOW_RESIZABLE);
+		}
+
+		return true;
+	}
 	void setWindowTitle(string title) {
 		SetWindowTitle(title.ptr);
 	}
@@ -262,7 +277,7 @@ class RaylibPlatform : IPlatform {
                 Event we;
                 we.type = EventType.mouseWheel;
                 we.window = windowRef;
-                we.mouseWheel.delta = cast(int)(wheel * 120); // Normalize to Win32-like delta (120 per notch)
+                we.mouseWheel.delta = cast(int)(wheel * 120);
                 instanceRef.pushEvent(we);
             }
 		}

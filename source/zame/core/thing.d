@@ -106,7 +106,7 @@ class Thing {
 	}
 
 	string info() {
-		return format("Entity (Id: %d, type: %s)\nRect: %s\nTags:%s\nPropertys:%s\nDestroyed: %s\n", id, type, rect, tags, properties, destroyed);
+		return format("Thing (Id: %d, type: %s)\nRect: %s\nTags:%s\nProperties:%s\nDestroyed: %s\n", id, type, rect, tags, properties, destroyed);
 	}
 	
 	override string toString() const {

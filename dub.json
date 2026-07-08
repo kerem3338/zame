@@ -24,6 +24,9 @@
   "targetType": "library",
   "dependencies": {
     "raylib-d": "~>5.5.3",
-    "gamut": "~>3.3.5"
+    "gamut": "~>3.3.5",
+    "arsd-official:image_files": "~>12.1.2",
+    "arsd-official:png": "~>12.1.2",
+    "arsd-official:ttf": "~>12.1.2"
   }
 }

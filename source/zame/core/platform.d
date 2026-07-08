@@ -10,6 +10,7 @@ import std.variant;
 import std.array : replicate;
 
 import zame;
+import zame.core.cache;
 import zame.core.profiler;
 
 version (Windows) {
@@ -125,6 +126,7 @@ class IPlatform {
 	abstract PlatformCapabilities capabilities();
 
 	abstract int createWindow(Window window);
+	abstract bool updateWindowSettings();
 	abstract void processMessages();
 	abstract void invalidate();
 	abstract void cleanup();
@@ -150,6 +152,7 @@ class Window {
 	IPlatform platform;
 	Window parent;
 	UISystem ui;
+	ConfigManager settings;
 
 	this(uint width, uint height, string title="Zame Engine") {
 		this.width = width;
@@ -158,10 +161,17 @@ class Window {
 		this.title = title;
 		this.ui = new UISystem(1920, 1080);
 		this.ui.updateSize(width, height);
+		this.settings = new ConfigManager();
+
+		settings.set("window_resizable", true, ConfigValueFlags.disableRemove | ConfigValueFlags.typeMustBeSame);
 	}
 
 	int createWindow() {
 		return platform.createWindow(this);
+	}
+
+	bool updateWindowSettings() {
+		return platform.updateWindowSettings();
 	}
 
     void onResize(int width, int height) {
@@ -179,11 +189,13 @@ class Window {
     Rect rect() {
     	return Rect(0, 0, width, height);
     }
+
+
 }
 
 class Instance {
 	Window window;
-	Variant[string] config;
+	ConfigManager settings;
 	Event[] eventQueue;
 	IPlatform platform;
 	Logger logger;

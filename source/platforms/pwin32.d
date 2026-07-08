@@ -40,7 +40,7 @@ version(Windows) {
 		override int createWindow(Window window) {
 			HINSTANCE hInstance = GetModuleHandleW(null);
 
-			auto className = "DWinClass".toUTF16z;
+			auto className = "ZameEngineClass".toUTF16z;
 			auto windowName = window.title.toUTF16z;
 
 			WNDCLASSW wc;
@@ -70,8 +70,11 @@ version(Windows) {
 			HWND parentHwnd = null;
 			DWORD style = WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN | WS_CLIPSIBLINGS;
 
+			if (!window.settings.get("window_resizable", true)) {
+				style &= ~(WS_THICKFRAME | WS_MAXIMIZEBOX);
+			}
+
 			if (window.parent !is null) {
-				// Find parent HWND
 				foreach (hwnd, ctx; contexts) {
 					if (ctx.windowRef is window.parent) {
 						parentHwnd = cast(HWND)hwnd;
@@ -109,7 +112,6 @@ version(Windows) {
 			ctx.hdc = GetDC(hwnd);
 			ctx.windowRef = window;
 			ctx.surfaceRef = window.surface;
-			// ctx.tempBuffer = new uint[ctx.surfaceRef.width * ctx.surfaceRef.height]; // No longer needed
 			contexts[hwnd] = ctx;
 
 			ShowWindow(hwnd, SW_SHOW);
@@ -125,6 +127,22 @@ version(Windows) {
 
 			instanceRef.logger.info("Window created successfully");
 			return 0;
+		}
+
+		override bool updateWindowSettings() {
+			LONG_PTR style = GetWindowLongPtr(mainHwnd, GWL_STYLE);
+
+			// check for resizing
+			if (contexts[mainHwnd].windowRef.settings.get("window_resizable", true)) {
+				style |= (WS_THICKFRAME | WS_MAXIMIZEBOX);
+			} else {
+				style &= ~(WS_THICKFRAME | WS_MAXIMIZEBOX);
+			}
+
+			SetWindowLongPtr(mainHwnd, GWL_STYLE, style);
+			SetWindowPos(mainHwnd, NULL, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+			
+			return true;
 		}
 
 		void setWindowTitle(Window window, string title) {
@@ -148,7 +166,7 @@ version(Windows) {
 			return this.targetFps;
 		}
 
-	override void setIcon(string path) {
+		override void setIcon(string path) {
 			if (mainHwnd is null) return;
 			HICON hIcon = createHIconFromFile(path);
 			if (hIcon !is null) {
@@ -157,19 +175,19 @@ version(Windows) {
 			}
 		}
 
-        void setWindowSize(Window window, int width, int height) {
-            foreach(hwnd, ctx; contexts) {
-                if (ctx.windowRef is window) {
-                    RECT rect = RECT(0, 0, width, height);
-                    DWORD style = GetWindowLongW(cast(HWND)hwnd, GWL_STYLE);
-                    AdjustWindowRect(&rect, style, FALSE);
-                    int w = rect.right - rect.left;
-                    int h = rect.bottom - rect.top;
-                    SetWindowPos(cast(HWND)hwnd, null, 0, 0, w, h, SWP_NOMOVE | SWP_NOZORDER);
-                    break;
-                }
-            }
-        }
+		void setWindowSize(Window window, int width, int height) {
+			foreach(hwnd, ctx; contexts) {
+				if (ctx.windowRef is window) {
+					RECT rect = RECT(0, 0, width, height);
+					DWORD style = GetWindowLongW(cast(HWND)hwnd, GWL_STYLE);
+					AdjustWindowRect(&rect, style, FALSE);
+					int w = rect.right - rect.left;
+					int h = rect.bottom - rect.top;
+					SetWindowPos(cast(HWND)hwnd, null, 0, 0, w, h, SWP_NOMOVE | SWP_NOZORDER);
+					break;
+				}
+			}
+		}
 
 		private HICON createHIconFromFile(string path) {
 			import zame.core.graphics : surfaceFromImage, Surface;
@@ -236,7 +254,7 @@ version(Windows) {
 
 		override void processMessages() {
 			MSG msg;
-			// NON-BLOCKING: PM_REMOVE yerine PM_NOREMOVE veya PM_NOYIELD kullan
+			// non-blocking: instead of PM_REMOVE use PM_NOREMOVE or PM_NOYIELD
 			while (PeekMessageW(&msg, null, 0, 0, PM_REMOVE)) {
 				if (msg.message == WM_QUIT) {
 					shouldQuit = true;
@@ -278,7 +296,7 @@ version(Windows) {
 			contexts.clear();
 			mainHwnd = null;
 			
-			auto className = "DWinClass".toUTF16z;
+			auto className = "ZameEngineClass".toUTF16z;
 			UnregisterClassW(className, GetModuleHandleW(null));
 			timeEndPeriod(1);
 
@@ -413,25 +431,25 @@ version(Windows) {
 			instanceRef.pushEvent(e);
 		}
 
-        void handleResize(HWND hwnd, int width, int height) {
-            auto pCtx = hwnd in contexts;
-            if (pCtx is null || instanceRef is null) return;
-            auto ctx = *pCtx;
-            
-            // Resize internal logic
-            ctx.windowRef.onResize(width, height);
-            ctx.surfaceRef = ctx.windowRef.surface;
-            contexts[hwnd] = ctx; // Update struct copy? D structs... context is value type?
-            // Actually contexts[hwnd] returns ref or copy? It's an AA.
-            // But we need to update it back if we modified it
-            contexts[hwnd].surfaceRef = ctx.windowRef.surface;
+		void handleResize(HWND hwnd, int width, int height) {
+			auto pCtx = hwnd in contexts;
+			if (pCtx is null || instanceRef is null) return;
+			auto ctx = *pCtx;
+			
+			// Resize internal logic
+			ctx.windowRef.onResize(width, height);
+			ctx.surfaceRef = ctx.windowRef.surface;
+			contexts[hwnd] = ctx; // Update struct copy? D structs... context is value type?
+			// Actually contexts[hwnd] returns ref or copy? It's an AA.
+			// But we need to update it back if we modified it
+			contexts[hwnd].surfaceRef = ctx.windowRef.surface;
 
-            Event e;
-            e.type = EventType.resized;
-            e.window = ctx.windowRef;
-            e.resize = WindowResizeEvent(width, height);
-            instanceRef.pushEvent(e);
-        }
+			Event e;
+			e.type = EventType.resized;
+			e.window = ctx.windowRef;
+			e.resize = WindowResizeEvent(width, height);
+			instanceRef.pushEvent(e);
+		}
 
 		KeyCode toKeyCode(ushort vk) {
 			switch (vk) {
@@ -710,11 +728,11 @@ version(Windows) {
 				platform.handlePaint(hwnd);
 				return 0;
 
-            case WM_SIZE:
-                int width = cast(int)LOWORD(lParam);
-                int height = cast(int)HIWORD(lParam);
-                platform.handleResize(hwnd, width, height);
-                return 0;
+			case WM_SIZE:
+				int width = cast(int)LOWORD(lParam);
+				int height = cast(int)HIWORD(lParam);
+				platform.handleResize(hwnd, width, height);
+				return 0;
 
 			case WM_ERASEBKGND:
 				return 1;

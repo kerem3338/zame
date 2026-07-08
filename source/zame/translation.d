@@ -14,9 +14,9 @@ import std.typecons;
 
 enum TranslationResult: int {
 	ok = 0,
-	text_not_founded = 1,
-	key_not_founded = 1,
-	language_not_founded = 2
+	textNotFounded = 1,
+	keyNotFounded = 1,
+	languageNotFounded = 2
 }
 
 version (Windows)
@@ -105,12 +105,12 @@ class TranslationManager {
 
 	Tuple!(TranslationResult, string) getText(string key, Variant[] values = [], string fallback = "") {
 		if (searchLanguage !in languages) {
-            return tuple(TranslationResult.language_not_founded, fallback != "" ? fallback : key);
+            return tuple(TranslationResult.languageNotFounded, fallback != "" ? fallback : key);
         }
         
         auto lang = languages[searchLanguage];
         if (key !in lang.texts) {
-            return tuple(TranslationResult.text_not_founded, fallback != "" ? fallback : key);
+            return tuple(TranslationResult.textNotFounded, fallback != "" ? fallback : key);
         }
 
         return tuple(TranslationResult.ok, lang.getText(key, values, fallback));

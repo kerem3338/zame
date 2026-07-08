@@ -14,12 +14,19 @@ import std.system;
 import zame.core.common;
 import zame.core.graphics;
 
+import arsd.ttf;
+
+struct FontInfo {
+    string name;
+}
+
 interface Font {
 	Size getSize(string text, int fontSize);
 	Surface getText(string text, Color color, int fontSize);
 	Surface getTextRich(string text, int fontSize, ubyte baseAlpha = 255);
 	Surface getTextRich(Tuple!(string, Color)[] chunks, int fontSize, ubyte baseAlpha = 255);
 	string[] wrapText(string text, int fontSize, int maxWidth);
+    FontInfo fontInfo();
 }
 
 class BitmapFont : Font {
@@ -44,6 +51,12 @@ class BitmapFont : Font {
 		this.loadAtlas(atlasPath);
 		this.readInfo(infoPath);
 	}
+
+    FontInfo fontInfo() {
+        FontInfo f;
+        f.name = this.name;
+        return f;
+    }
 
 	void loadAtlas(string path) {
 		atlas = new Surface(1, 1);
@@ -346,7 +359,13 @@ class GenericBitmapFont : Font {
 		this.path = path;
 		readFont();
 	}
-
+    
+    FontInfo fontInfo() {
+        FontInfo f;
+        f.name = this.name;
+        return f;
+    }
+    
 	void readFont() {
 		auto text = readText(path);
 		auto lines = text.splitLines;
@@ -482,686 +501,195 @@ class GenericBitmapFont : Font {
 	}
 }
 
+// TrueTypeFont is finally working :)
 class TrueTypeFont : Font {
-	private ubyte[] data;
-	private int unitsPerEm;
-	private int indexToLocFormat; // 0 = short, 1 = long
-	private int numGlyphs;
-	
-	// Table offsets
-	private size_t headOffset;
-	private size_t maxpOffset;
-	private size_t locaOffset;
-	private size_t glyfOffset;
-	private size_t cmapOffset;
-	private size_t hmtxOffset;
-	private size_t hheaOffset;
-
-	// Cache
-	private int[dchar] charMap;
-	
-	private ushort readU16(size_t offset) {
-		if (offset + 1 >= data.length) return 0;
-		return bigEndianToNative!ushort(data[offset .. offset + 2].to!(ubyte[2]));
-	}
-	private short readI16(size_t offset) {
-		if (offset + 1 >= data.length) return 0;
-		return bigEndianToNative!short(data[offset .. offset + 2].to!(ubyte[2]));
-	}
-	private uint readU32(size_t offset) {
-		if (offset + 3 >= data.length) return 0;
-		return bigEndianToNative!uint(data[offset .. offset + 4].to!(ubyte[4]));
-	}
-	
-	this(string path) {
-		if (!exists(path)) throw new Exception("Font file not found: " ~ path);
-		this.data = cast(ubyte[])read(path);
-		parseTables();
-	}
-	
-	private void parseTables() {
-		// Offset Table
-		// 0: scalars (u32)
-		// 4: numTables (u16)
-		ushort numTables = readU16(4);
-		size_t offset = 12;
-		
-		for(int i=0; i<numTables; i++) {
-			// Tag is 4 bytes
-			 string tag = cast(string)data[offset .. offset+4];
-			 size_t checkSum = readU32(offset+4);
-			 size_t tableOffset = readU32(offset+8);
-			 size_t length = readU32(offset+12);
-			 
-			 if (tag == "head") headOffset = tableOffset;
-			 else if (tag == "maxp") maxpOffset = tableOffset;
-			 else if (tag == "loca") locaOffset = tableOffset;
-			 else if (tag == "glyf") glyfOffset = tableOffset;
-			 else if (tag == "cmap") cmapOffset = tableOffset;
-			 else if (tag == "hmtx") hmtxOffset = tableOffset;
-			 else if (tag == "hhea") hheaOffset = tableOffset;
-			 
-			 offset += 16;
-		}
-		
-		// Parse HEAD
-		unitsPerEm = readU16(headOffset + 18);
-		indexToLocFormat = readI16(headOffset + 50);
-		
-		// Parse CMAP (Format 4)
-		parseCmap();
-	}
-	
-	private void parseCmap() {
-		ushort version_ = readU16(cmapOffset);
-		ushort numTables = readU16(cmapOffset + 2);
-		
-		size_t selectedSubtable = 0;
-		 
-		// Find Windows Unicode BMP (3, 1) or Unicode (0, 3)
-		size_t offset = cmapOffset + 4;
-		for(int i=0; i<numTables; i++) {
-			ushort platformId = readU16(offset);
-			ushort encodingId = readU16(offset+2);
-			uint suboffset = readU32(offset+4);
-			
-			if (platformId == 3 && encodingId == 1) { // Windows Unicode
-				selectedSubtable = cmapOffset + suboffset;
-				break;
-			}
-			 if (platformId == 0 && encodingId == 3) { // Unicode
-				selectedSubtable = cmapOffset + suboffset;
-				break;
-			}
-			offset += 8;
-		}
-		
-		if (selectedSubtable == 0) return; // Not found
-		
-		ushort format = readU16(selectedSubtable);
-		if (format == 4) {
-			ushort length = readU16(selectedSubtable + 2);
-			ushort segCountX2 = readU16(selectedSubtable + 6);
-			int segCount = segCountX2 / 2;
-			
-			size_t endCodeOffset = selectedSubtable + 14;
-			size_t startCodeOffset = endCodeOffset + segCountX2 + 2;
-			size_t idDeltaOffset = startCodeOffset + segCountX2;
-			size_t idRangeOffsetOffset = idDeltaOffset + segCountX2;
-			
-			// Map all printable characters including Turkish and extended Latin
-			// This covers: Basic Latin, Latin-1 Supplement, Latin Extended-A, Latin Extended-B
-			// Range includes: <, >, and all Turkish characters (ç, ğ, ı, ö, ş, ü, Ç, Ğ, İ, Ö, Ş, Ü)
-			for (dchar c = 32; c < 592; c++) {
-				 int glyphIndex = getGlyphIndexFormat4(c, segCount, endCodeOffset, startCodeOffset, idDeltaOffset, idRangeOffsetOffset, selectedSubtable);
-				 if (glyphIndex != 0) charMap[c] = glyphIndex;
-			}
-			// Fallback
-			charMap['?'] = getGlyphIndexFormat4('?', segCount, endCodeOffset, startCodeOffset, idDeltaOffset, idRangeOffsetOffset, selectedSubtable);
-		} else if (format == 12) {
-			 // Not implementing format 12 for now (needed for high unicode)
-		}
-	}
-	
-	private int getGlyphIndexFormat4(dchar c, int segCount, size_t endCodeOff, size_t startCodeOff, size_t idDeltaOff, size_t idRangeOff, size_t tableStart) {
-		int code = cast(int)c;
-		for(int i=0; i<segCount; i++) {
-			 ushort endCode = readU16(endCodeOff + i*2);
-			 if (code <= endCode) {
-				 ushort startCode = readU16(startCodeOff + i*2);
-				 if (code >= startCode) {
-					 short idDelta = readI16(idDeltaOff + i*2);
-					 ushort idRangeOffset = readU16(idRangeOff + i*2);
-					 
-					 if (idRangeOffset == 0) {
-						 return (code + idDelta) & 0xFFFF;
-					 } else {
-						 // Obscure index calculation logic from spec
-						 size_t addr = idRangeOff + i*2 + idRangeOffset + (code - startCode)*2;
-						 ushort val = readU16(addr);
-						 if (val == 0) return 0;
-						 return (val + idDelta) & 0xFFFF;
-					 }
-				 }
-				 break; // Sorted, so if code <= endCode and not >= startCode, it's not in this segment
-			 }
-		}
-		return 0;
-	}
-	
-	 private struct PointF { float x; float y; bool onCurve; }
-	 
-	 private PointF[][] getGlyphContours(int glyphIndex) {
-		 if (locaOffset == 0 || glyfOffset == 0) return [];
-		 
-		 size_t glyphOff = 0;
-		 if (indexToLocFormat == 0) {
-			 glyphOff = readU16(locaOffset + glyphIndex * 2) * 2;
-		 } else {
-			 glyphOff = readU32(locaOffset + glyphIndex * 4);
-		 }
-		 
-		  size_t nextOff = 0;
-		  if (indexToLocFormat == 0) nextOff = readU16(locaOffset + (glyphIndex+1)*2) * 2;
-		  else nextOff = readU32(locaOffset + (glyphIndex+1)*4);
-		  
-		  if (glyphOff == nextOff) return [];
-		 
-		 size_t start = glyfOffset + glyphOff;
-		 short numContours = readI16(start);
-		 
-		 if (numContours < 0) {
-			 // Composite glyph - render component glyphs
-			 // Format: flags(u16), glyphIndex(u16), [arg1, arg2, ...]
-			 // We'll implement a simplified version that just renders the base glyph
-			 size_t offset = start + 10; // Skip glyph header
-			 
-			 PointF[][] allContours;
-			 
-			 while (true) {
-				 ushort flags = readU16(offset);
-				 ushort componentGlyphIndex = readU16(offset + 2);
-				 offset += 4;
-				 
-				 // Read transformation arguments
-				 short arg1, arg2;
-				 if (flags & 0x0001) { // ARG_1_AND_2_ARE_WORDS
-					 arg1 = readI16(offset);
-					 arg2 = readI16(offset + 2);
-					 offset += 4;
-				 } else {
-					 arg1 = cast(byte)data[offset];
-					 arg2 = cast(byte)data[offset + 1];
-					 offset += 2;
-				 }
-				 
-				 if (flags & 0x0008) offset += 2;  // WE_HAVE_A_SCALE
-				 if (flags & 0x0040) offset += 4;  // WE_HAVE_AN_X_AND_Y_SCALE  
-				 if (flags & 0x0080) offset += 8;  // WE_HAVE_A_TWO_BY_TWO
-				 
-				 // Recursive get component contours
-				 PointF[][] componentContours = getGlyphContours(componentGlyphIndex);
-				 
-				 // Apply transformation (Translation only for now)
-				 // If ARGS_ARE_XY_VALUES (0x0002) is set, args are values. Otherwise they are point indices.
-				 if (flags & 0x0002) {
-					 float dx = cast(float)arg1;
-					 float dy = cast(float)arg2;
-					 
-					 // If scaled, these values might be scaled too? 
-					 // In standard TrueType, offset is in FUnits (unscaled).
-					 // But if there is a scale component, does it apply to offset?
-					 // Spec: "If bit 1 is set... the values are offsets... in FUnits."
-					 
-					 foreach(ref contour; componentContours) {
-						 foreach(ref p; contour) {
-							 p.x += dx;
-							 p.y += dy;
-						 }
-					 }
-				 }
-				 
-				 allContours ~= componentContours;
-				 
-				 if (!(flags & 0x0020)) break; // MORE_COMPONENTS flag
-			 }
-			 
-			 return allContours;
-		 }
-		 
-		 size_t endPtsOfContoursOff = start + 10;
-		 ushort instructionLen = readU16(endPtsOfContoursOff + numContours * 2);
-		 size_t flagsOff = endPtsOfContoursOff + numContours * 2 + 2 + instructionLen;
-		 
-		 int numPoints = readU16(endPtsOfContoursOff + (numContours-1)*2) + 1;
-		 
-		 PointF[] points = new PointF[](numPoints);
-		 ubyte[] flags = new ubyte[](numPoints);
-		 
-		 size_t ptr = flagsOff;
-		 for(int i=0; i<numPoints; i++) {
-			 ubyte flag = data[ptr++];
-			 flags[i] = flag;
-			 if (flag & 8) {
-				 ubyte count = data[ptr++];
-				 for(int r=0; r<count; r++) {
-					 i++;
-					 flags[i] = flag;
-				 }
-			 }
-		 }
-		 
-		 short currentX = 0;
-		 for(int i=0; i<numPoints; i++) {
-			 ubyte f = flags[i];
-			 if (f & 2) {
-				 ubyte val = data[ptr++];
-				 currentX += (f & 16) ? val : -val;
-			 } else {
-				  if (!(f & 16)) {
-					  short val = readI16(ptr);
-					  ptr += 2;
-					  currentX += val;
-				  }
-			 }
-			 points[i].x = currentX;
-			 points[i].onCurve = (f & 1) != 0;
-		 }
-		 
-		 short currentY = 0;
-		 for(int i=0; i<numPoints; i++) {
-			 ubyte f = flags[i];
-			 if (f & 4) {
-				 ubyte val = data[ptr++];
-				 currentY += (f & 32) ? val : -val;
-			 } else {
-				  if (!(f & 32)) { 
-					  short val = readI16(ptr);
-					  ptr += 2;
-					  currentY += val;
-				  }
-			 }
-			 points[i].y = currentY;
-		 }
-		 
-		 PointF[][] contours;
-		 int ptIdx = 0;
-		  for(int c=0; c<numContours; c++) {
-			  int endPt = readU16(endPtsOfContoursOff + c*2);
-			  int count = endPt - ptIdx + 1;
-			  contours ~= points[ptIdx .. ptIdx + count];
-			  ptIdx = endPt + 1;
-		  }
-		 
-		 return contours;
-	 }
-
-	private struct Edge {
-		float x;
-		float dx; // 1/slope
-		int yMax;
-		
-		// Sorting: Primary Y-min (implicit by bucket), Secondary X, Tertiary dx
-	}
-
-	private struct Segment { PointF p0; PointF p1; }
-
-	private Surface rasterizeGlyph(int glyphIndex, int fontSize, out int advanceWidth, out int yOffset) {
-		float scale = cast(float)fontSize / unitsPerEm;
-		
-		ushort numHMetrics = readU16(hheaOffset + 34);
-		int advW = 0;
-		if (glyphIndex < numHMetrics) {
-			advW = readU16(hmtxOffset + glyphIndex * 4);
-		} else {
-			advW = readU16(hmtxOffset + (numHMetrics-1) * 4);
-		}
-		advanceWidth = cast(int)(advW * scale);
-		
-		PointF[][] contours = getGlyphContours(glyphIndex);
-		
-		if (contours.length == 0) {
-			// Empty glyph (space) - return transparent surface
-			yOffset = 0;
-			Surface empty = new Surface(max(1, advanceWidth), fontSize);
-			empty.fill(Colors.transparent);
-			return empty;
-		}
-		
-		// Find bounds
-		float minX = 10000, maxX = -10000, minY = 10000, maxY = -10000;
-		foreach(c; contours) foreach(p; c) {
-			minX = min(minX, p.x); maxX = max(maxX, p.x);
-			minY = min(minY, p.y); maxY = max(maxY, p.y);
-		}
-		
-		// Normalize bounds references
-		float rawMinX = minX;
-		float rawMaxX = maxX;
-		float rawMinY = minY;
-		float rawMaxY = maxY;
-		
-		int w = cast(int)ceil((maxX - minX) * scale) + 2;
-		int h = cast(int)ceil((maxY - minY) * scale) + 2;
-		
-		// Calculate y offset for baseline alignment
-		// In TTF, Y increases upward. We need to know how far below baseline this glyph extends
-		yOffset = cast(int)(rawMaxY * scale);
-		
-		if (w < 1) w = 1; 
-		if (h < 1) h = 1;
-		
-		Surface surf = new Surface(w, h);
-		surf.fill(Colors.transparent);
-		
-		// Supersampling
-		int supersample = 4;
-		int bufW = w * supersample;
-		int bufH = h * supersample;
-		bool[] buffer = new bool[](bufW * bufH);
-		
-		// Edge List Logic
-		// Transform all points first
-		auto transform = (PointF p) {
-			return PointF(
-				(p.x - rawMinX) * scale * supersample + supersample,
-				(rawMaxY - p.y) * scale * supersample + supersample,
-				p.onCurve
-			);
-		};
-		
-
-		
-		Segment[] edges;
-		
-		foreach(contour; contours) {
-			 PointF prev = contour[$-1];
-			 if (!prev.onCurve) {
-				 if (contour[0].onCurve) prev = contour[$-1]; 
-				 else prev = PointF((contour[$-1].x + contour[0].x)/2, (contour[$-1].y + contour[0].y)/2, true);
-			 } else {
-				 prev = contour[$-1];
-			 }
-			 
-			 for(int i=0; i<contour.length; i++) {
-				 PointF p = contour[i];
-				 if (p.onCurve) {
-					 edges ~= Segment(transform(prev), transform(p));
-					 prev = p;
-				 } else {
-					 int nextIdx = cast(int)((i+1) % contour.length);
-					 PointF next = contour[nextIdx];
-					 
-					 PointF target;
-					 if (next.onCurve) {
-						 target = next;
-						 i++;
-					 } else {
-						 target = PointF((p.x + next.x)/2, (p.y + next.y)/2, true);
-					 }
-					 flattenCurve(edges, transform(prev), transform(p), transform(target));
-					 prev = target;
-				 }
-			 }
-		}
-
-		// --- Rasterize Scanlines ---
-		// Build Edge Table by scanline? array of arrays.
-		// Or just one big list of edges and iterate Y?
-		// Since H is small (fontSize * SS), array of lists is fine.
-		
-		struct EdgeIntersection {
-			float x;
-			int dir; // 1 for up, -1 for down
-		}
-		
-		EdgeIntersection[][] activeEdges = new EdgeIntersection[][](bufH);
-		
-		foreach(e; edges) {
-			PointF p0 = e.p0;
-			PointF p1 = e.p1;
-			
-			if (abs(p0.y - p1.y) < 0.001) continue;
-			
-			int dir = (p1.y > p0.y) ? 1 : -1;
-			if (p0.y > p1.y) { auto tmp = p0; p0 = p1; p1 = tmp; }
-			
-			// We want to sample at pixel CENTERS (y + 0.5)
-			int yStart = cast(int)ceil(p0.y - 0.5f);
-			int yEnd = cast(int)ceil(p1.y - 0.5f);
-			
-			if (yStart < 0) yStart = 0;
-			if (yEnd > bufH) yEnd = bufH;
-			
-			float dx = (p1.x - p0.x) / (p1.y - p0.y);
-			
-			for(int y = yStart; y < yEnd; y++) {
-				float sampleY = y + 0.5f;
-				float x = p0.x + (sampleY - p0.y) * dx;
-				activeEdges[y] ~= EdgeIntersection(x, dir);
-			}
-		}
-		
-		for(int y=0; y < bufH; y++) {
-			 if (activeEdges[y].length == 0) continue;
-			 
-			 // Sort by X
-			 activeEdges[y].sort!((a, b) => a.x < b.x);
-			 
-			 bool filling = false;
-			 int lastX = 0;
-			 
-			 foreach(edge; activeEdges[y]) {
-				 int x = cast(int)floor(edge.x + 0.5f);
-				 
-				 if (filling) {
-					 int x0 = max(0, lastX);
-					 int x1 = min(bufW, x);
-					 for(int px = x0; px < x1; px++) {
-						 buffer[y*bufW + px] = true;
-					 }
-				 }
-				 
-				 filling = !filling;
-				 lastX = x;
-			 }
-		}
-		
-		// Downsample
-		int totalPixels = 0;
-		for(int y=0; y<h; y++) {
-			for(int x=0; x<w; x++) {
-				int sum = 0;
-				for(int sy=0; sy<supersample; sy++) 
-				for(int sx=0; sx<supersample; sx++) {
-					 int by = y*supersample+sy;
-					 int bx = x*supersample+sx;
-					 if (by < bufH && bx < bufW && buffer[by*bufW + bx]) sum++;
-				}
-				
-				int alpha = (sum * 255) / (supersample*supersample);
-				if (alpha > 0) {
-					surf.setPixel(Point(x,y), Color(255,255,255,cast(ubyte)alpha));
-					totalPixels++;
-				}
-			}
-		}
-		
-		return surf;
-	}
-	
-	// Recursive Flatten
-	private void flattenCurve(ref Segment[] edges, PointF p0, PointF c, PointF p1) {
-		// Distance from c to line p0-p1
-		float dx = p1.x - p0.x;
-		float dy = p1.y - p0.y;
-		float dist = abs(dy*c.x - dx*c.y + p1.x*p0.y - p1.y*p0.x) / sqrt(dx*dx + dy*dy);
-		
-		if (dist < 0.5f || (dx == 0 && dy == 0)) {
-			edges ~= Segment(p0, p1);
-			return;
-		}
-		
-		PointF m0 = PointF((p0.x + c.x)/2, (p0.y + c.y)/2);
-		PointF m1 = PointF((c.x + p1.x)/2, (c.y + p1.y)/2);
-		PointF mm = PointF((m0.x + m1.x)/2, (m0.y + m1.y)/2);
-		
-		flattenCurve(edges, p0, m0, mm);
-		flattenCurve(edges, mm, m1, p1);
-	}
-	
-	// Interface Methods
-	Size getSize(string text, int fontSize) {
-		int w = 0;
-		foreach(dchar c; text) {
-			int idx = (c in charMap) ? charMap[c] : 0;
-			if (idx == 0) continue;
-			
-			 // Very rough metric estimate if not rasterizing
-			float scale = cast(float)fontSize / unitsPerEm;
-			ushort numHMetrics = readU16(hheaOffset + 34);
-			int advW = (idx < numHMetrics) ? readU16(hmtxOffset + idx * 4) : readU16(hmtxOffset + (numHMetrics-1) * 4);
-			w += cast(int)(advW * scale);
-		}
-		return Size(w, fontSize);
-	}
-
-	private struct CachedGlyph {
-		Surface s;
-		int adv;
-		int yOff;
-	}
-
-	private CachedGlyph[string] glyphCache;
-
-	Surface getText(string text, Color color, int fontSize) {
-		if (text.length == 0) return new Surface(1, 1);
-
-		// Get font metrics for baseline calculation
-		short ascender = readI16(hheaOffset + 4);
-		float scale = cast(float)fontSize / unitsPerEm;
-		int baselineOffset = cast(int)(ascender * scale);
-
-		// Rasterize each glyph
-		CachedGlyph[] glyphs;
-		int totalW = 0;
-		int maxH = fontSize;
-
-		foreach (dchar c; text) {
-			int idx = (c in charMap) ? charMap[c] : 0;
-			if (idx == 0 && c != ' ') idx = charMap.get('?', 0);
-
-			string cacheKey = format("%d_%d", idx, fontSize);
-			CachedGlyph g;
-
-			if (auto p = cacheKey in glyphCache) {
-				g = *p;
-			} else {
-				int adv = 0;
-				int yOff = 0;
-				Surface s = rasterizeGlyph(idx, fontSize, adv, yOff);
-				g = CachedGlyph(s, adv, yOff);
-				glyphCache[cacheKey] = g;
-			}
-
-			if (g.s.height > maxH) maxH = g.s.height;
-			glyphs ~= g;
-			totalW += g.adv;
-		}
-
-		if (totalW == 0) totalW = 1;
-		Surface result = new Surface(totalW, cast(int)(fontSize * 1.5));
-		result.fill(Colors.transparent);
-
-		int x = 0;
-
-		foreach (g; glyphs) {
-			// Calculate Y position based on baseline
-			int y = baselineOffset - g.yOff;
-			result.blit(g.s, x, y, true);
-			x += g.adv;
-		}
-
-		// Apply color globally
-		foreach (ref p; result.rawData) {
-			if (p.a > 0) {
-				p.r = color.r; p.g = color.g; p.b = color.b;
-				p.a = cast(ubyte)(p.a * color.a / 255);
-			}
-		}
-
-		return result;
-	}
-
-	Surface getTextRich(string text, int fontSize, ubyte baseAlpha = 255) {
-		import std.typecons : tuple;
-		Tuple!(string, Color)[] chunks;
-		
-		Color currentColor = Colors.white;
-		string currentText = "";
-		
-		static Color[string] colorMap;
-		if (colorMap.length == 0) {
-			import std.traits : EnumMembers;
-			import std.conv : to;
-			static foreach (member; EnumMembers!Colors) {
-				colorMap[member.to!string.toLower] = member;
-			}
-		}
-
-		for (size_t i = 0; i < text.length; i++) {
-			if (text[i] == '%' && i + 1 < text.length) {
-				size_t j = i + 1;
-				while (j < text.length && text[j] != '%') j++;
-				
-				if (j < text.length) {
-					string tag = text[i+1 .. j].toLower;
-					if (currentText.length > 0) chunks ~= tuple(currentText, currentColor);
-					currentText = "";
-					
-					if (tag == "reset") {
-						currentColor = Colors.white;
-					} else if (auto p = tag in colorMap) {
-						currentColor = *p;
-					}
-					i = j;
-					continue;
-				}
-			}
-			currentText ~= text[i];
-		}
-		if (currentText.length > 0) chunks ~= tuple(currentText, currentColor);
-		
-		return getTextRich(chunks, fontSize, baseAlpha);
-	}
-	
-	Surface getTextRich(Tuple!(string, Color)[] chunks, int fontSize, ubyte baseAlpha = 255) {
-		if (chunks.length == 0) return new Surface(1, 1);
-		
-		Surface[] surfaces;
-		int totalW = 0;
-		int maxH = fontSize;
-		
-		foreach (chunk; chunks) {
-			Color chunkColor = chunk[1];
-			if (baseAlpha != 255) {
-				chunkColor.a = cast(ubyte)(chunkColor.a * baseAlpha / 255);
-			}
-			Surface s = getText(chunk[0], chunkColor, fontSize);
-			surfaces ~= s;
-			totalW += s.width;
-		}
-		
-		auto outSurf = new Surface(totalW, maxH);
-		outSurf.fill(Color(0,0,0,0));
-		
-		int cx = 0;
-		foreach (s; surfaces) {
-			outSurf.blit(s, cx, 0, true);
-			cx += s.width;
-		}
-		
-		return outSurf;
-	}
-
-	string[] wrapText(string text, int fontSize, int maxWidth) {
-		import std.string : split;
-		string[] lines;
-		string[] words = text.split(" ");
-		string currentLine = "";
-		
-		foreach (word; words) {
-			string testLine = currentLine.length == 0 ? word : currentLine ~ " " ~ word;
-			Size s = getSize(testLine, fontSize);
-			if (s.w > maxWidth && currentLine.length > 0) {
-				lines ~= currentLine;
-				currentLine = word;
-			} else {
-				currentLine = testLine;
-			}
-		}
-		
-		if (currentLine.length > 0) lines ~= currentLine;
-		return lines;
-	}
+    private TtfFont font;
+    private string fontPath;
+    
+    private struct CachedItem {
+        Surface surface;
+        Size size;
+    }
+    private CachedItem[string] cache;
+    
+    this(string path) {
+        if (!exists(path)) throw new Exception("Font file not found: " ~ path);
+        this.fontPath = path;
+        this.font = TtfFont(cast(ubyte[]) read(path));
+    }
+    
+    this(TtfFont font) {
+        this.font = font;
+        this.fontPath = ":memory:";
+    }
+    
+    FontInfo fontInfo() {
+        FontInfo f;
+        f.name = this.fontPath; // dirty little hack
+        return f;
+    }
+    
+    Size getSize(string text, int fontSize) {
+        if (text.length == 0) return Size(0, 0);
+        
+        string key = text ~ "_" ~ fontSize.to!string;
+        if (auto p = key in cache) {
+            return p.size;
+        }
+        
+        int width, height;
+        font.getStringSize(text, fontSize, width, height);
+        Size size = Size(width, height);
+        
+        cache[key] = CachedItem(null, size);
+        return size;
+    }
+    
+    Surface getText(string text, Color color, int fontSize) {
+        if (text.length == 0) {
+            auto empty = new Surface(1, 1);
+            empty.fill(Colors.transparent);
+            return empty;
+        }
+        
+        string key = text ~ "_" ~ fontSize.to!string;
+        
+        if (auto p = key in cache) {
+            if (p.surface !is null && color == Colors.white) {
+                return p.surface;
+            }
+        }
+        
+        int width, height;
+        auto bitmap = font.renderString(text, fontSize, width, height);
+        
+        if (width == 0 || height == 0) {
+            auto empty = new Surface(1, 1);
+            empty.fill(Colors.transparent);
+            return empty;
+        }
+        
+        auto surf = new Surface(width, height);
+        surf.fill(Colors.transparent);
+        
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                ubyte alpha = bitmap[y * width + x];
+                if (alpha > 0) {
+                    Color pixel = Color(color.r, color.g, color.b,
+                        cast(ubyte)(color.a * alpha / 255));
+                    surf.setPixel(Point(x, y), pixel);
+                }
+            }
+        }
+        
+        if (color == Colors.white) {
+            cache[key] = CachedItem(surf, Size(width, height));
+        }
+        
+        return surf;
+    }
+    
+    Surface getTextRich(string text, int fontSize, ubyte baseAlpha = 255) {
+        import std.typecons : tuple;
+        Tuple!(string, Color)[] chunks;
+        
+        Color currentColor = Colors.white;
+        string currentText = "";
+        
+        static Color[string] colorMap;
+        if (colorMap.length == 0) {
+            import std.traits : EnumMembers;
+            import std.conv : to;
+            static foreach (member; EnumMembers!Colors) {
+                colorMap[member.to!string.toLower] = member;
+            }
+        }
+        
+        for (size_t i = 0; i < text.length; i++) {
+            if (text[i] == '%' && i + 1 < text.length) {
+                size_t j = i + 1;
+                while (j < text.length && text[j] != '%') j++;
+                
+                if (j < text.length) {
+                    string tag = text[i+1 .. j].toLower;
+                    if (currentText.length > 0) chunks ~= tuple(currentText, currentColor);
+                    currentText = "";
+                    
+                    if (tag == "reset") {
+                        currentColor = Colors.white;
+                    } else if (auto p = tag in colorMap) {
+                        currentColor = *p;
+                    }
+                    i = j;
+                    continue;
+                }
+            }
+            currentText ~= text[i];
+        }
+        if (currentText.length > 0) chunks ~= tuple(currentText, currentColor);
+        
+        return getTextRich(chunks, fontSize, baseAlpha);
+    }
+    
+    Surface getTextRich(Tuple!(string, Color)[] chunks, int fontSize, ubyte baseAlpha = 255) {
+        if (chunks.length == 0) {
+            auto empty = new Surface(1, 1);
+            empty.fill(Colors.transparent);
+            return empty;
+        }
+        
+        Surface[] surfaces;
+        int totalW = 0;
+        int maxH = 0;
+        
+        foreach (chunk; chunks) {
+            Color chunkColor = chunk[1];
+            if (baseAlpha != 255) {
+                chunkColor.a = cast(ubyte)(chunkColor.a * baseAlpha / 255);
+            }
+            Surface s = getText(chunk[0], chunkColor, fontSize);
+            surfaces ~= s;
+            totalW += s.width;
+            if (s.height > maxH) maxH = s.height;
+        }
+        
+        if (maxH == 0) maxH = fontSize;
+        auto outSurf = new Surface(totalW, maxH);
+        outSurf.fill(Colors.transparent);
+        
+        int cx = 0;
+        foreach (s; surfaces) {
+            int y = (maxH - s.height) / 2;
+            outSurf.blit(s, cx, y, true);
+            cx += s.width;
+        }
+        
+        return outSurf;
+    }
+    
+    string[] wrapText(string text, int fontSize, int maxWidth) {
+        import std.string : split;
+        string[] lines;
+        string[] words = text.split(" ");
+        string currentLine = "";
+        
+        foreach (word; words) {
+            string testLine = currentLine.length == 0 ? word : currentLine ~ " " ~ word;
+            Size s = getSize(testLine, fontSize);
+            if (s.w > maxWidth && currentLine.length > 0) {
+                lines ~= currentLine;
+                currentLine = word;
+            } else {
+                currentLine = testLine;
+            }
+        }
+        
+        if (currentLine.length > 0) lines ~= currentLine;
+        return lines;
+    }
+    
+    void clearCache() {
+        cache.clear();
+    }
 }
