@@ -118,6 +118,7 @@ class Logger {
 		m.unlock();
 	}
 
+	
 	void info(string msg, string loggerName = null)  { log("INFO", msg, loggerName); }
 	void debug_(string msg, string loggerName = null) { log("DEBUG", msg, loggerName); }
 	void warn(string msg, string loggerName = null)  { log("WARN", msg, loggerName); }

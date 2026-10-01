@@ -27,6 +27,8 @@ interface Font {
 	Surface getTextRich(Tuple!(string, Color)[] chunks, int fontSize, ubyte baseAlpha = 255);
 	string[] wrapText(string text, int fontSize, int maxWidth);
     FontInfo fontInfo();
+
+    alias render = getText;
 }
 
 class BitmapFont : Font {

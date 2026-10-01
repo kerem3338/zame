@@ -3,19 +3,19 @@ module zame.core.common3d;
 import zame;
 import std.math;
 
-Vec3 rotate_xz(Vec3 v, float angle) {
+Vec3 rotateXZ(Vec3 v, float angle) {
     float c = cos(angle);
     float s = sin(angle);
     return Vec3(v.x * c - v.z * s, v.y, v.x * s + v.z * c);
 }
 
-Vec3 rotate_yz(Vec3 v, float angle) {
+Vec3 rotateYZ(Vec3 v, float angle) {
     float c = cos(angle * 0.7f);
     float s = sin(angle * 0.7f);
     return Vec3(v.x, v.y * c - v.z * s, v.y * s + v.z * c);
 }
 
-Vec3 translate_z(Vec3 v, float dz) {
+Vec3 translateZ(Vec3 v, float dz) {
     return Vec3(v.x, v.y, v.z + dz);
 }
 
@@ -42,9 +42,9 @@ Point[] spinImage3D(Vec3[4] quad, float angleXZ, float angleYZ, float dz, uint s
     points.length = quad.length;
 
     foreach(i, v; quad) {
-        Vec3 tmp = rotate_xz(v, angleXZ);
-        tmp = rotate_yz(tmp, angleYZ);
-        tmp = translate_z(tmp, dz);
+        Vec3 tmp = rotateXZ(v, angleXZ);
+        tmp = rotateYZ(tmp, angleYZ);
+        tmp = translateZ(tmp, dz);
 
         points[i] = project(tmp, screenWidth, screenHeight);
     }

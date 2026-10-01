@@ -4,19 +4,19 @@ import zame.core.common;
 import zame.core.cache;
 
 interface ISound {
-    /** Play the sound */
+    /// Play the sound
     void play();
     
-    /** Stop the sound */
+    /// Stop the sound
     void stop();
     
-    /** 0.0 to 1.0 */
+    /// 0.0 to 1.0
     void setVolume(float volume);
     
-    /** Check if sound is playing */
+    /// Check if sound is playing
     bool isPlaying();
     
-    /** Update sound (Required for live audio) */
+    /// Update sound (Required for live audio)
     void update();
 }
 

@@ -1,3 +1,6 @@
+/+
+Windows Platform For Zame
++/
 module platforms.pwin32;
 
 import zame;
@@ -28,13 +31,18 @@ version(Windows) {
 		HWND mainHwnd;
 		Instance instanceRef;
 		bool shouldQuit = false;
-
+		uint targetFps = 60;
+		IAudioDevice audioDevice;
+		
 		override string platformName() {
 			return PlatformName.win32;
 		}
 
 		override PlatformCapabilities capabilities() {
-			return PlatformCapabilities(true);
+			PlatformCapabilities p;
+			p.hasSubWindows = true;
+			p.canMoveWindow = true;
+			return p;
 		}
 		
 		override int createWindow(Window window) {
@@ -145,6 +153,56 @@ version(Windows) {
 			return true;
 		}
 
+		override void moveWindow(Window window, int x, int y) {
+			HWND hwnd = getHwndForWindow(window);
+			if (hwnd is null) return;
+			SetWindowPos(hwnd, null, x, y, 0, 0, SWP_NOSIZE | SWP_NOZORDER);
+			
+			RECT rect;
+			if (GetWindowRect(hwnd, &rect)) {
+				window.position.x = rect.left;
+				window.position.y = rect.top;
+			}
+		}
+
+		 override DisplayInfo[] getDisplays() {
+			DisplayInfo[] result;
+
+			extern(Windows)
+			BOOL enumProc(HMONITOR hMonitor, HDC, LPRECT, LPARAM lParam) {
+				auto arr = cast(DisplayInfo[]*)lParam;
+				if (arr is null) return TRUE;
+
+				MONITORINFOEXW mi;
+				mi.cbSize = MONITORINFOEXW.sizeof;
+				if (GetMonitorInfoW(hMonitor, &mi)) {
+					DisplayInfo info;
+					info.name = toUTF8(fromStringz(mi.szDevice.ptr));
+					info.size = Size(
+						mi.rcMonitor.right - mi.rcMonitor.left,
+						mi.rcMonitor.bottom - mi.rcMonitor.top
+					);
+					info.position = Point(mi.rcMonitor.left, mi.rcMonitor.top);
+					info.isPrimary = (mi.dwFlags & MONITORINFOF_PRIMARY) != 0;
+					info.refreshRate = 0;
+					*arr ~= info;
+				}
+				return TRUE;
+			}
+
+			DisplayInfo[] displays;
+			EnumDisplayMonitors(null, null, &enumProc, cast(LPARAM)&displays);
+			return displays;
+		}
+
+
+		override DisplayInfo getPrimaryDisplay() {
+			foreach (info; getDisplays()) {
+				if (info.isPrimary) return info;
+			}
+			return DisplayInfo.init;
+		}
+
 		void setWindowTitle(Window window, string title) {
 			foreach (hwnd, ctx; contexts) {
 				if (ctx.windowRef is window) {
@@ -250,8 +308,6 @@ version(Windows) {
 			return hIcon;
 		}
 
-		uint targetFps = 60;
-
 		override void processMessages() {
 			MSG msg;
 			// non-blocking: instead of PM_REMOVE use PM_NOREMOVE or PM_NOYIELD
@@ -303,6 +359,7 @@ version(Windows) {
 			if (audioDevice !is null) {
 				audioDevice.cleanup();
 			}
+			instanceRef.logger.info("Cleanup Done.");
 		}
 
 		override bool isRunning() {
@@ -311,6 +368,23 @@ version(Windows) {
 
 		override void exit() {
 			shouldQuit = true;
+		}
+
+		private HWND getHwndForWindow(Window window) {
+			foreach (hwnd, ctx; contexts) {
+				if (ctx.windowRef is window) {
+					return cast(HWND)hwnd;
+				}
+			}
+			return null;
+		}
+
+		void handleMove(HWND hwnd, int x, int y) {
+			auto pCtx = hwnd in contexts;
+			if (pCtx is null || instanceRef is null) return;
+			auto ctx = *pCtx;
+			ctx.windowRef.position.x = x;
+			ctx.windowRef.position.y = y;
 		}
 
 		void handlePaint(HWND hwnd) {
@@ -584,7 +658,132 @@ version(Windows) {
 			ShowCursor(visible ? TRUE : FALSE);
 		}
 
-		IAudioDevice audioDevice;
+		override DeviceInfo getDeviceInfo() {
+			import core.sys.windows.winreg;
+			import std.string : fromStringz;
+
+			DeviceInfo info;
+			info.platformName = PlatformName.win32;
+			info.graphicsApi  = GraphicsApi(GraphicsApiType.software, "Win32 GDI");
+			info.fillBuildFlags();
+
+			// Query true Windows OS version using RtlGetVersion & Registry
+			uint major = 0, minor = 0, build = 0;
+			string prodName;
+
+			HMODULE hNtdll = GetModuleHandleA("ntdll.dll");
+			if (hNtdll !is null) {
+				alias pfnRtlGetVersion = extern(Windows) LONG function(void*);
+				struct RTL_OSVERSIONINFOEXW {
+					DWORD dwOSVersionInfoSize;
+					DWORD dwMajorVersion;
+					DWORD dwMinorVersion;
+					DWORD dwBuildNumber;
+					DWORD dwPlatformId;
+					WCHAR[128] szCSDVersion;
+					WORD wServicePackMajor;
+					WORD wServicePackMinor;
+					WORD wSuiteMask;
+					BYTE wProductType;
+					BYTE wReserved;
+				}
+				auto pRtlGetVersion = cast(pfnRtlGetVersion) GetProcAddress(hNtdll, "RtlGetVersion");
+				if (pRtlGetVersion !is null) {
+					RTL_OSVERSIONINFOEXW rovi;
+					rovi.dwOSVersionInfoSize = RTL_OSVERSIONINFOEXW.sizeof;
+					if (pRtlGetVersion(&rovi) == 0) {
+						major = rovi.dwMajorVersion;
+						minor = rovi.dwMinorVersion;
+						build = rovi.dwBuildNumber;
+					}
+				}
+			}
+
+			{
+				HKEY hKeyOS;
+				if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion", 0, KEY_READ, &hKeyOS) == ERROR_SUCCESS) {
+					char[256] buf;
+					DWORD sz = buf.sizeof;
+					DWORD typ;
+					if (RegQueryValueExA(hKeyOS, "ProductName", null, &typ, cast(ubyte*)buf.ptr, &sz) == ERROR_SUCCESS) {
+						prodName = buf[0 .. sz].fromStringz.idup;
+					}
+					RegCloseKey(hKeyOS);
+				}
+			}
+
+			if (major != 0) {
+				info.osVersion = format("%d.%d.%d", major, minor, build);
+			} else {
+				info.osVersion = "Unknown";
+			}
+
+			if (prodName.length > 0) {
+				// Handle Windows 11 build number check (Windows 11 reports Windows 10 in some registry keys)
+				if (major == 10 && build >= 22000 && prodName.startsWith("Windows 10")) {
+					import std.array : replace;
+					info.osName = prodName.replace("Windows 10", "Windows 11");
+				} else {
+					info.osName = prodName;
+				}
+			} else if (major == 10 && build >= 22000) {
+				info.osName = "Windows 11";
+			} else if (major == 10) {
+				info.osName = "Windows 10";
+			} else if (major == 6 && minor == 3) {
+				info.osName = "Windows 8.1";
+			} else if (major == 6 && minor == 2) {
+				info.osName = "Windows 8";
+			} else if (major == 6 && minor == 1) {
+				info.osName = "Windows 7";
+			} else {
+				info.osName = format("Windows %d.%d", major, minor);
+			}
+
+			SYSTEM_INFO si;
+			GetSystemInfo(&si);
+			info.cpuThreads = si.dwNumberOfProcessors;
+			info.cpuCores   = info.cpuThreads;
+
+			{
+				HKEY hKey;
+				if (RegOpenKeyExA(HKEY_LOCAL_MACHINE,
+						"HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0",
+						0, KEY_READ, &hKey) == ERROR_SUCCESS)
+				{
+					char[256] buf;
+					DWORD sz  = buf.sizeof;
+					DWORD typ;
+					if (RegQueryValueExA(hKey, "ProcessorNameString", null, &typ,
+							cast(ubyte*)buf.ptr, &sz) == ERROR_SUCCESS)
+					{
+						info.cpuModel = buf[0 .. sz].fromStringz.idup;
+					}
+					RegCloseKey(hKey);
+				}
+				if (info.cpuModel.length == 0) info.cpuModel = "Unknown CPU";
+			}
+
+			{
+				MEMORYSTATUSEX ms;
+				ms.dwLength = MEMORYSTATUSEX.sizeof;
+				if (GlobalMemoryStatusEx(&ms)) {
+					info.totalRam     = ms.ullTotalPhys;
+					info.availableRam = ms.ullAvailPhys;
+				}
+			}
+
+			{
+				DISPLAY_DEVICEA dd;
+				dd.cb = DISPLAY_DEVICEA.sizeof;
+				if (EnumDisplayDevicesA(null, 0, &dd, 0))
+					info.gpuModel = dd.DeviceString[0..$].fromStringz.idup;
+				if (info.gpuModel.length == 0) info.gpuModel = "Unknown GPU";
+			}
+
+			return info;
+		}
+
 	}
 
 	class Win32RaylibSound : ISound {
@@ -709,6 +908,12 @@ version(Windows) {
 				int mx = cast(int)LOWORD(lParam);
 				int my = cast(int)HIWORD(lParam);
 				platform.handleMouseMove(hwnd, mx, my);
+				return 0;
+
+			case WM_MOVE:
+				int x = cast(int)LOWORD(lParam);
+				int y = cast(int)HIWORD(lParam);
+				platform.handleMove(hwnd, x, y);
 				return 0;
 
 			case WM_LBUTTONDOWN:

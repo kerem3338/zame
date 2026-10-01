@@ -1,3 +1,6 @@
+/+
+Raylib Platform For Zame
++/
 module platforms.praylib;
 
 import zame;
@@ -107,29 +110,227 @@ Modifiers getModifiers()
 	}
 }
 
+class RaylibTexture : ITexture {
+	Texture2D tex;
+	this(Texture2D t) { this.tex = t; }
+	uint width() const { return cast(uint)tex.width; }
+	uint height() const { return cast(uint)tex.height; }
+	void* handle() { return cast(void*)&tex; }
+	~this() {
+		UnloadTexture(tex);
+	}
+}
+
+alias ZColor = zame.core.common.Color;
+alias ZColors = zame.core.graphics.Colors;
+
+class RaylibGraphics : IGraphics {
+	private Rect clipRect;
+	private bool clipping = false;
+	private Texture2D[Surface] surfaceTextureCache;
+
+	private pragma(inline, true) RLColor toRL(ZColor c) pure nothrow @nogc {
+		return RLColor(c.r, c.g, c.b, c.a);
+	}
+
+	void begin() {
+		BeginDrawing();
+	}
+
+	void end() {
+		EndDrawing();
+	}
+
+	void clear(ZColor color) {
+		ClearBackground(toRL(color));
+	}
+
+	void setClip(Rect rect) {
+		clipRect = rect;
+		clipping = true;
+		BeginScissorMode(rect.x, rect.y, rect.w, rect.h);
+	}
+
+	void resetClip() {
+		if (clipping) {
+			EndScissorMode();
+			clipping = false;
+		}
+	}
+
+	Rect getClipRect() const { return clipRect; }
+	bool isClipping() const { return clipping; }
+
+	void drawPoint(Point p, ZColor color) {
+		DrawPixel(p.x, p.y, toRL(color));
+	}
+
+	void drawLine(Point p0, Point p1, ZColor color, int thickness = 1) {
+		DrawLineEx(Vector2(p0.x, p0.y), Vector2(p1.x, p1.y), cast(float)thickness, toRL(color));
+	}
+
+	void drawDottedLine(Point p0, Point p1, ZColor color, int dotLen = 5, int gapLen = 5, int thickness = 1) {
+		float dx = cast(float)(p1.x - p0.x);
+		float dy = cast(float)(p1.y - p0.y);
+		float dist = sqrt(dx * dx + dy * dy);
+		if (dist <= 0) return;
+
+		float nx = dx / dist;
+		float ny = dy / dist;
+		float curr = 0;
+		while (curr < dist) {
+			float segEnd = min(curr + dotLen, dist);
+			DrawLineEx(
+				Vector2(p0.x + nx * curr, p0.y + ny * curr),
+				Vector2(p0.x + nx * segEnd, p0.y + ny * segEnd),
+				cast(float)thickness,
+				toRL(color)
+			);
+			curr += dotLen + gapLen;
+		}
+	}
+
+	void drawRect(Rect rect, ZColor color) {
+		DrawRectangle(rect.x, rect.y, rect.w, rect.h, toRL(color));
+	}
+
+	void drawRectOutline(Rect rect, ZColor color, uint thickness = 1) {
+		DrawRectangleLinesEx(Rectangle(rect.x, rect.y, rect.w, rect.h), cast(float)thickness, toRL(color));
+	}
+
+	void drawCircle(Point center, int radius, ZColor color) {
+		DrawCircleLines(center.x, center.y, cast(float)radius, toRL(color));
+	}
+
+	void drawFilledCircle(Point center, int radius, ZColor color) {
+		DrawCircle(center.x, center.y, cast(float)radius, toRL(color));
+	}
+
+	void drawPolygon(Point[] points, ZColor color, int thickness = 1) {
+		if (points.length < 2) return;
+		foreach (i; 0 .. points.length) {
+			auto p1 = points[i];
+			auto p2 = points[(i + 1) % points.length];
+			drawLine(p1, p2, color, thickness);
+		}
+	}
+
+	void drawFilledPolygon(Point[] points, ZColor color) {
+		if (points.length < 3) return;
+		Vector2 center = Vector2(0, 0);
+		foreach (p; points) {
+			center.x += p.x;
+			center.y += p.y;
+		}
+		center.x /= points.length;
+		center.y /= points.length;
+		foreach (i; 0 .. points.length) {
+			auto p1 = points[i];
+			auto p2 = points[(i + 1) % points.length];
+			DrawTriangle(center, Vector2(p1.x, p1.y), Vector2(p2.x, p2.y), toRL(color));
+		}
+	}
+
+	private Texture2D getOrUploadSurfaceTexture(Surface src) {
+		if (auto pTex = src in surfaceTextureCache) {
+			return *pTex;
+		}
+		Image img = GenImageColor(cast(int)src.width, cast(int)src.height, RLColor(0, 0, 0, 0));
+		ubyte* data = cast(ubyte*)img.data;
+		auto raw = src.rawData;
+		foreach (i; 0 .. raw.length) {
+			auto c = raw[i];
+			size_t idx = i * 4;
+			data[idx + 0] = cast(ubyte)c.r;
+			data[idx + 1] = cast(ubyte)c.g;
+			data[idx + 2] = cast(ubyte)c.b;
+			data[idx + 3] = cast(ubyte)c.a;
+		}
+		Texture2D tex = LoadTextureFromImage(img);
+		UnloadImage(img);
+		surfaceTextureCache[src] = tex;
+		return tex;
+	}
+
+	void drawSurface(Surface src, int x, int y, bool useAlpha = true, ubyte globalAlpha = 255) {
+		if (src is null) return;
+		Texture2D tex = getOrUploadSurfaceTexture(src);
+		RLColor tint = RLColor(255, 255, 255, globalAlpha);
+		DrawTexture(tex, x, y, tint);
+	}
+
+	void drawSurfaceRotated(Surface src, int x, int y, float angleRadians) {
+		if (src is null) return;
+		Texture2D tex = getOrUploadSurfaceTexture(src);
+		float angleDeg = angleRadians * 180.0f / std.math.PI;
+		Rectangle srcR = Rectangle(0, 0, tex.width, tex.height);
+		Rectangle dstR = Rectangle(x, y, tex.width, tex.height);
+		Vector2 origin = Vector2(tex.width / 2.0f, tex.height / 2.0f);
+		DrawTexturePro(tex, srcR, dstR, origin, angleDeg, RLColor(255, 255, 255, 255));
+	}
+
+	void drawSurfaceScaled(Surface src, Rect destRect) {
+		if (src is null) return;
+		Texture2D tex = getOrUploadSurfaceTexture(src);
+		Rectangle srcR = Rectangle(0, 0, tex.width, tex.height);
+		Rectangle dstR = Rectangle(destRect.x, destRect.y, destRect.w, destRect.h);
+		DrawTexturePro(tex, srcR, dstR, Vector2(0, 0), 0.0f, RLColor(255, 255, 255, 255));
+	}
+
+	void drawTexture(ITexture texture, Rect srcRect, Rect destRect, ZColor tint = ZColors.white) {
+		if (texture is null) return;
+		Texture2D* rlTex = cast(Texture2D*)texture.handle();
+		if (rlTex is null) return;
+		Rectangle srcR = Rectangle(srcRect.x, srcRect.y, srcRect.w, srcRect.h);
+		Rectangle dstR = Rectangle(destRect.x, destRect.y, destRect.w, destRect.h);
+		DrawTexturePro(*rlTex, srcR, dstR, Vector2(0, 0), 0.0f, toRL(tint));
+	}
+
+	void cleanup() {
+		foreach (ref tex; surfaceTextureCache) {
+			UnloadTexture(tex);
+		}
+		surfaceTextureCache.clear();
+	}
+}
+
 class RaylibPlatform : IPlatform {
 	Surface surfaceRef;
 	Instance instanceRef;
 	Window windowRef;
+	RaylibGraphics graphicsBackend;
 
 	Image image;
 	Texture2D texture;
-    IAudioDevice audioDevice;
+	IAudioDevice audioDevice;
 
 	bool initialized = false;
 	bool shouldQuit = false;
+
+	override IGraphics getGraphics(Window window) {
+		if (graphicsBackend is null) {
+			graphicsBackend = new RaylibGraphics();
+		}
+		return graphicsBackend;
+	}
 
 	override string platformName() {
 		return PlatformName.raylib;
 	}
 
 	override PlatformCapabilities capabilities() {
-		return PlatformCapabilities(false);
+		PlatformCapabilities p;
+		p.hasSubWindows = false;
+		p.canMoveWindow = true;
+		return p;
 	}
 
 	override int createWindow(Window window) {
 		windowRef = window;
 		surfaceRef = window.surface;
+
+		import raylib : SetConfigFlags, ConfigFlags;
+		SetConfigFlags(ConfigFlags.FLAG_VSYNC_HINT);
 
 		InitWindow(window.width, window.height, window.title.ptr);
 		SetExitKey(KeyboardKey.KEY_NULL);
@@ -138,7 +339,7 @@ class RaylibPlatform : IPlatform {
 			return -1;
 
 		if (windowRef.settings.get("window_resizable", true)) {
-		    SetWindowState(ConfigFlags.FLAG_WINDOW_RESIZABLE);
+			SetWindowState(ConfigFlags.FLAG_WINDOW_RESIZABLE);
 		}
 		
 		image = GenImageColor(
@@ -150,8 +351,8 @@ class RaylibPlatform : IPlatform {
 		texture = LoadTextureFromImage(image);
 		initialized = true;
 
-        audioDevice = new RaylibAudioDevice();
-        audioDevice.init();
+		audioDevice = new RaylibAudioDevice();
+		audioDevice.init();
 
 		instanceRef.logger.info("Window created successfully");
 		return 0;
@@ -161,13 +362,45 @@ class RaylibPlatform : IPlatform {
 		import raylib: ConfigFlags;
 		// check for resizing
 		if (windowRef.settings.get("window_resizable", true)) {
-		    SetWindowState(ConfigFlags.FLAG_WINDOW_RESIZABLE);
+			SetWindowState(ConfigFlags.FLAG_WINDOW_RESIZABLE);
 		} else {
-		    ClearWindowState(ConfigFlags.FLAG_WINDOW_RESIZABLE);
+			ClearWindowState(ConfigFlags.FLAG_WINDOW_RESIZABLE);
 		}
 
 		return true;
 	}
+
+	override void moveWindow(Window window, int x, int y) {
+		SetWindowPosition(x, y);
+		window.position.x = x;
+		window.position.y = y;
+	}
+
+	override DisplayInfo[] getDisplays() {
+        DisplayInfo[] result;
+        int count = GetMonitorCount();
+        for (int i = 0; i < count; i++) {
+            DisplayInfo info;
+            info.name = fromStringz(GetMonitorName(i)).idup;
+            info.size = Size(GetMonitorWidth(i), GetMonitorHeight(i));
+            Vector2 pos = GetMonitorPosition(i);
+            info.position = Point(cast(int)pos.x, cast(int)pos.y);
+            info.isPrimary = (i == 0);
+            info.refreshRate = 0;
+            result ~= info;
+        }
+        return result;
+    }
+
+    override DisplayInfo getPrimaryDisplay() {
+        auto displays = getDisplays();
+        foreach (d; displays) {
+            if (d.isPrimary) return d;
+        }
+        if (displays.length > 0) return displays[0];
+        return DisplayInfo.init;
+    }
+
 	void setWindowTitle(string title) {
 		SetWindowTitle(title.ptr);
 	}
@@ -177,7 +410,8 @@ class RaylibPlatform : IPlatform {
 	}
 
 	override void setTargetFps(uint fps) {
-		SetTargetFPS(fps);
+		// Do not call Raylib's SetTargetFPS() because it uses a CPU busy-wait spinlock.
+		// Frame rate throttling is handled cleanly via VSync and engine Thread.sleep().
 		this.targetFps = fps;
 	}
 
@@ -185,7 +419,7 @@ class RaylibPlatform : IPlatform {
 		return this.targetFps;
 	}
 
-    uint targetFps = 60;
+	uint targetFps = 60;
 
 	void handleKeyboard() {
 		if (instanceRef is null)
@@ -248,38 +482,38 @@ class RaylibPlatform : IPlatform {
 			e.mouseMoved = MouseMoveEvent(sx, sy);
 			instanceRef.pushEvent(e);
 
-            
-            import raylib : MouseButton, IsMouseButtonPressed, IsMouseButtonReleased;
-            MouseButton[3] buttons = [MouseButton.MOUSE_BUTTON_LEFT, MouseButton.MOUSE_BUTTON_RIGHT, MouseButton.MOUSE_BUTTON_MIDDLE];
-            MouseEvent.ButtonType[3] types = [MouseEvent.ButtonType.left, MouseEvent.ButtonType.right, MouseEvent.ButtonType.middle];
+			
+			import raylib : MouseButton, IsMouseButtonPressed, IsMouseButtonReleased;
+			MouseButton[3] buttons = [MouseButton.MOUSE_BUTTON_LEFT, MouseButton.MOUSE_BUTTON_RIGHT, MouseButton.MOUSE_BUTTON_MIDDLE];
+			MouseEvent.ButtonType[3] types = [MouseEvent.ButtonType.left, MouseEvent.ButtonType.right, MouseEvent.ButtonType.middle];
 
-            foreach (i; 0 .. 3) {
-                if (IsMouseButtonPressed(buttons[i])) {
-                    Event be;
-                    be.type = EventType.mouseButtonPressed;
-                    be.window = windowRef;
-                    be.mouse = MouseEvent(sx, sy, types[i]);
-                    instanceRef.pushEvent(be);
-                }
-                if (IsMouseButtonReleased(buttons[i])) {
-                    Event be;
-                    be.type = EventType.mouseButtonReleased;
-                    be.window = windowRef;
-                    be.mouse = MouseEvent(sx, sy, types[i]);
-                    instanceRef.pushEvent(be);
-                }
-            }
+			foreach (i; 0 .. 3) {
+				if (IsMouseButtonPressed(buttons[i])) {
+					Event be;
+					be.type = EventType.mouseButtonPressed;
+					be.window = windowRef;
+					be.mouse = MouseEvent(sx, sy, types[i]);
+					instanceRef.pushEvent(be);
+				}
+				if (IsMouseButtonReleased(buttons[i])) {
+					Event be;
+					be.type = EventType.mouseButtonReleased;
+					be.window = windowRef;
+					be.mouse = MouseEvent(sx, sy, types[i]);
+					instanceRef.pushEvent(be);
+				}
+			}
 
-            
-            import raylib : GetMouseWheelMove;
-            float wheel = GetMouseWheelMove();
-            if (wheel != 0) {
-                Event we;
-                we.type = EventType.mouseWheel;
-                we.window = windowRef;
-                we.mouseWheel.delta = cast(int)(wheel * 120);
-                instanceRef.pushEvent(we);
-            }
+			
+			import raylib : GetMouseWheelMove;
+			float wheel = GetMouseWheelMove();
+			if (wheel != 0) {
+				Event we;
+				we.type = EventType.mouseWheel;
+				we.window = windowRef;
+				we.mouseWheel.delta = cast(int)(wheel * 120);
+				instanceRef.pushEvent(we);
+			}
 		}
 	}
 
@@ -327,128 +561,293 @@ class RaylibPlatform : IPlatform {
 	}
 
 	override void cleanup() {
+		if (graphicsBackend !is null) {
+			graphicsBackend.cleanup();
+			graphicsBackend = null;
+		}
+
 		if (initialized) {
-            if (audioDevice !is null) audioDevice.cleanup();
+			if (audioDevice !is null) audioDevice.cleanup();
 			UnloadTexture(texture);
 			UnloadImage(image);
 			initialized = false;
 		}
 
 		CloseWindow();
+		instanceRef.logger.info("Cleanup Done.");
 	}
 
 	override bool isRunning() {
 		return !shouldQuit;
 	}
 
-    override void exit() {
-        shouldQuit = true;
-    }
+	override void exit() {
+		shouldQuit = true;
+	}
 
-    override IAudioDevice getAudioDevice() {
-        if (audioDevice is null) audioDevice = new NullAudioDevice();
-        return audioDevice;
-    }
+	override IAudioDevice getAudioDevice() {
+		if (audioDevice is null) audioDevice = new NullAudioDevice();
+		return audioDevice;
+	}
 
-    override string getClipboard() {
-        import std.string : fromStringz;
-        const(char)* ptr = GetClipboardText();
-        if (ptr is null) return "";
-        return ptr.fromStringz.idup;
-    }
+	override string getClipboard() {
+		import std.string : fromStringz;
+		const(char)* ptr = GetClipboardText();
+		if (ptr is null) return "";
+		return ptr.fromStringz.idup;
+	}
 
-    override void setClipboard(string text) {
-        import std.string : toStringz;
-        SetClipboardText(text.toStringz);
-    }
+	override void setClipboard(string text) {
+		import std.string : toStringz;
+		SetClipboardText(text.toStringz);
+	}
 
-    override void showMouse(bool visible) {
-        if (visible) ShowCursor();
-        else HideCursor();
-    }
+	override void showMouse(bool visible) {
+		if (visible) ShowCursor();
+		else HideCursor();
+	}
+
+	override DeviceInfo getDeviceInfo() {
+		import std.string : fromStringz;
+
+		DeviceInfo info;
+		info.platformName = PlatformName.raylib;
+		info.graphicsApi  = GraphicsApi(GraphicsApiType.openGL, "Raylib");
+		info.fillBuildFlags();
+
+		int monitorCount = GetMonitorCount();
+		if (monitorCount > 0) {
+			const(char)* monName = GetMonitorName(0);
+			if (monName !is null)
+				info.gpuModel = monName.fromStringz.idup;
+		}
+		if (info.gpuModel.length == 0)
+			info.gpuModel = "Unknown GPU";
+
+		version (Windows) {
+			import core.sys.windows.windows;
+			import core.sys.windows.winreg;
+
+			uint major = 0, minor = 0, build = 0;
+			string prodName;
+
+			HMODULE hNtdll = GetModuleHandleA("ntdll.dll");
+			if (hNtdll !is null) {
+				alias pfnRtlGetVersion = extern(Windows) LONG function(void*);
+				struct RTL_OSVERSIONINFOEXW {
+					DWORD dwOSVersionInfoSize;
+					DWORD dwMajorVersion;
+					DWORD dwMinorVersion;
+					DWORD dwBuildNumber;
+					DWORD dwPlatformId;
+					WCHAR[128] szCSDVersion;
+					WORD wServicePackMajor;
+					WORD wServicePackMinor;
+					WORD wSuiteMask;
+					BYTE wProductType;
+					BYTE wReserved;
+				}
+				auto pRtlGetVersion = cast(pfnRtlGetVersion) GetProcAddress(hNtdll, "RtlGetVersion");
+				if (pRtlGetVersion !is null) {
+					RTL_OSVERSIONINFOEXW rovi;
+					rovi.dwOSVersionInfoSize = RTL_OSVERSIONINFOEXW.sizeof;
+					if (pRtlGetVersion(&rovi) == 0) {
+						major = rovi.dwMajorVersion;
+						minor = rovi.dwMinorVersion;
+						build = rovi.dwBuildNumber;
+					}
+				}
+			}
+
+			HKEY hKeyWin;
+			if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion", 0, KEY_READ, &hKeyWin) == ERROR_SUCCESS) {
+				char[256] buf;
+				DWORD sz = buf.sizeof;
+				DWORD typ;
+				if (RegQueryValueExA(hKeyWin, "ProductName", null, &typ, cast(ubyte*)buf.ptr, &sz) == ERROR_SUCCESS) {
+					prodName = buf[0 .. sz].fromStringz.idup;
+				}
+				RegCloseKey(hKeyWin);
+			}
+
+			if (major != 0) {
+				info.osVersion = format("%d.%d.%d", major, minor, build);
+			} else {
+				info.osVersion = "Unknown";
+			}
+
+			if (prodName.length > 0) {
+				if (major == 10 && build >= 22000 && prodName.startsWith("Windows 10")) {
+					import std.array : replace;
+					info.osName = prodName.replace("Windows 10", "Windows 11");
+				} else {
+					info.osName = prodName;
+				}
+			} else if (major == 10 && build >= 22000) {
+				info.osName = "Windows 11";
+			} else if (major == 10) {
+				info.osName = "Windows 10";
+			} else if (major == 6 && minor == 3) {
+				info.osName = "Windows 8.1";
+			} else if (major == 6 && minor == 2) {
+				info.osName = "Windows 8";
+			} else if (major == 6 && minor == 1) {
+				info.osName = "Windows 7";
+			} else {
+				info.osName = format("Windows %d.%d", major, minor);
+			}
+
+			SYSTEM_INFO si;
+			GetSystemInfo(&si);
+			info.cpuThreads = si.dwNumberOfProcessors;
+			info.cpuCores   = info.cpuThreads;
+
+			HKEY hKey;
+			if (RegOpenKeyExA(HKEY_LOCAL_MACHINE,
+					"HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0",
+					0, KEY_READ, &hKey) == ERROR_SUCCESS)
+			{
+				char[256] buf; DWORD sz = buf.sizeof; DWORD typ;
+				if (RegQueryValueExA(hKey, "ProcessorNameString", null, &typ,
+						cast(ubyte*)buf.ptr, &sz) == ERROR_SUCCESS)
+					info.cpuModel = buf[0 .. sz].fromStringz.idup;
+				RegCloseKey(hKey);
+			}
+			if (info.cpuModel.length == 0) info.cpuModel = "Unknown CPU";
+
+			MEMORYSTATUSEX ms;
+			ms.dwLength = MEMORYSTATUSEX.sizeof;
+			if (GlobalMemoryStatusEx(&ms)) {
+				info.totalRam     = ms.ullTotalPhys;
+				info.availableRam = ms.ullAvailPhys;
+			}
+		} else version (linux) {
+			import std.file   : readText, exists;
+			import std.string : splitLines, strip, startsWith, split;
+			import std.conv   : to;
+
+			info.osName = "Linux";
+			if (exists("/etc/os-release")) {
+				foreach (line; readText("/etc/os-release").splitLines()) {
+					if (line.startsWith("PRETTY_NAME=")) {
+						info.osName = line["PRETTY_NAME=".length .. $].strip('"').idup;
+						break;
+					}
+				}
+			}
+			if (exists("/proc/cpuinfo")) {
+				foreach (line; readText("/proc/cpuinfo").splitLines()) {
+					if (line.startsWith("model name") && info.cpuModel.length == 0) {
+						auto idx = line.indexOf(':');
+						if (idx >= 0) info.cpuModel = line[idx+1..$].strip.idup;
+					}
+					if (line.startsWith("processor")) info.cpuThreads++;
+				}
+				if (info.cpuCores == 0) info.cpuCores = info.cpuThreads;
+			}
+			if (info.cpuModel.length == 0) info.cpuModel = "Unknown CPU";
+			if (exists("/proc/meminfo")) {
+				foreach (line; readText("/proc/meminfo").splitLines()) {
+					auto parts = line.split();
+					if (line.startsWith("MemTotal:") && parts.length >= 2)
+						info.totalRam = parts[1].to!ulong * 1024;
+					if (line.startsWith("MemAvailable:") && parts.length >= 2)
+						info.availableRam = parts[1].to!ulong * 1024;
+				}
+			}
+		} else version (OSX) {
+			info.osName   = "macOS";
+			info.cpuModel = "Apple CPU";
+		} else {
+			info.osName   = "Unknown OS";
+			info.cpuModel = "Unknown CPU";
+		}
+
+		return info;
+	}
 }
 
 class RaylibSound : ISound {
-    import raylib : Sound, PlaySound, StopSound, SetSoundVolume, IsSoundPlaying, UnloadSound;
-    Sound rlSound;
+	import raylib : Sound, PlaySound, StopSound, SetSoundVolume, IsSoundPlaying, UnloadSound;
+	Sound rlSound;
 
-    this(Sound s) {
-        this.rlSound = s;
-    }
+	this(Sound s) {
+		this.rlSound = s;
+	}
 
-    ~this() {
-        UnloadSound(rlSound);
-    }
+	~this() {
+		UnloadSound(rlSound);
+	}
 
-    override void play() { PlaySound(rlSound); }
-    override void stop() { StopSound(rlSound); }
-    override void setVolume(float volume) { SetSoundVolume(rlSound, volume); }
-    override bool isPlaying() { return IsSoundPlaying(rlSound); }
-    override void update() {}
+	override void play() { PlaySound(rlSound); }
+	override void stop() { StopSound(rlSound); }
+	override void setVolume(float volume) { SetSoundVolume(rlSound, volume); }
+	override bool isPlaying() { return IsSoundPlaying(rlSound); }
+	override void update() {}
 }
 
 class RaylibMusic : ISound {
-    import raylib : Music, PlayMusicStream, StopMusicStream, SetMusicVolume, IsMusicStreamPlaying, UpdateMusicStream, UnloadMusicStream;
-    Music rlMusic;
+	import raylib : Music, PlayMusicStream, StopMusicStream, SetMusicVolume, IsMusicStreamPlaying, UpdateMusicStream, UnloadMusicStream;
+	Music rlMusic;
 
-    this(Music m) {
-        this.rlMusic = m;
-    }
+	this(Music m) {
+		this.rlMusic = m;
+	}
 
-    ~this() {
-        UnloadMusicStream(rlMusic);
-    }
+	~this() {
+		UnloadMusicStream(rlMusic);
+	}
 
-    override void play() { PlayMusicStream(rlMusic); }
-    override void stop() { StopMusicStream(rlMusic); }
-    override void setVolume(float volume) { SetMusicVolume(rlMusic, volume); }
-    override bool isPlaying() { return IsMusicStreamPlaying(rlMusic); }
-    override void update() { UpdateMusicStream(rlMusic); }
+	override void play() { PlayMusicStream(rlMusic); }
+	override void stop() { StopMusicStream(rlMusic); }
+	override void setVolume(float volume) { SetMusicVolume(rlMusic, volume); }
+	override bool isPlaying() { return IsMusicStreamPlaying(rlMusic); }
+	override void update() { UpdateMusicStream(rlMusic); }
 }
 
 class RaylibAudioDevice : IAudioDevice {
-    import raylib : InitAudioDevice, CloseAudioDevice, IsAudioDeviceReady, LoadSound, SetMasterVolume;
+	import raylib : InitAudioDevice, CloseAudioDevice, IsAudioDeviceReady, LoadSound, SetMasterVolume;
 
-    override void init() {
-        import raylib : SetTraceLogLevel, TraceLogLevel;
-        SetTraceLogLevel(TraceLogLevel.LOG_ALL);
-        if (!IsAudioDeviceReady()) {
-            InitAudioDevice();
-        }
-    }
+	override void init() {
+		import raylib : SetTraceLogLevel, TraceLogLevel;
+		SetTraceLogLevel(TraceLogLevel.LOG_ALL);
+		if (!IsAudioDeviceReady()) {
+			InitAudioDevice();
+		}
+	}
 
-    override void cleanup() {
-        if (IsAudioDeviceReady()) {
-            CloseAudioDevice();
-        }
-    }
+	override void cleanup() {
+		if (IsAudioDeviceReady()) {
+			CloseAudioDevice();
+		}
+	}
 
-    override Outcome!ISound loadSound(string path) {
-        import std.string : toStringz;
-        auto s = LoadSound(path.toStringz);
-        // Note: checking if sound is loaded correctly in raylib-d is tricky as Sound struct has ptrs.
-        // Usually if it fails, it returns empty data.
-        return success!ISound(new RaylibSound(s));
-    }
+	override Outcome!ISound loadSound(string path) {
+		import std.string : toStringz;
+		auto s = LoadSound(path.toStringz);
+		// Note: checking if sound is loaded correctly in raylib-d is tricky as Sound struct has ptrs.
+		// Usually if it fails, it returns empty data.
+		return success!ISound(new RaylibSound(s));
+	}
 
-    override Outcome!ISound loadMusic(string path) {
-        import raylib : LoadMusicStream, IsAudioDeviceReady;
-        import std.stdio : writeln;
-        writeln("[AUDIO] Loading music stream (Raylib): ", path);
-        if (!IsAudioDeviceReady()) {
-            writeln("[AUDIO] Error: Audio device is not ready (Raylib) when loading music!");
-            return failure!ISound(Result.error, "Audio device is not ready");
-        }
-        auto m = LoadMusicStream(path.toStringz);
-        if (m.frameCount == 0) {
-            writeln("[AUDIO] Failed to load music stream (frameCount == 0): ", path);
-            return failure!ISound(Result.error, "Failed to load music (frameCount == 0)");
-        }
-        writeln("[AUDIO] Music stream loaded: ", m.frameCount, " frames");
-        return success!ISound(new RaylibMusic(m));
-    }
+	override Outcome!ISound loadMusic(string path) {
+		import raylib : LoadMusicStream, IsAudioDeviceReady;
+		import std.stdio : writeln;
+		writeln("[AUDIO] Loading music stream (Raylib): ", path);
+		if (!IsAudioDeviceReady()) {
+			writeln("[AUDIO] Error: Audio device is not ready (Raylib) when loading music!");
+			return failure!ISound(Result.error, "Audio device is not ready");
+		}
+		auto m = LoadMusicStream(path.toStringz);
+		if (m.frameCount == 0) {
+			writeln("[AUDIO] Failed to load music stream (frameCount == 0): ", path);
+			return failure!ISound(Result.error, "Failed to load music (frameCount == 0)");
+		}
+		writeln("[AUDIO] Music stream loaded: ", m.frameCount, " frames");
+		return success!ISound(new RaylibMusic(m));
+	}
 
-    override void setMasterVolume(float volume) {
-        SetMasterVolume(volume);
-    }
+	override void setMasterVolume(float volume) {
+		SetMasterVolume(volume);
+	}
 }

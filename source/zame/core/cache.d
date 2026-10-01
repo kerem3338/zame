@@ -4,6 +4,7 @@ import std.variant;
 import std.typecons;
 import std.conv;
 import std.traits : Parameters;
+import std.algorithm: startsWith;
 
 class KeyValueEvent(D) {
     private D[] _delegates;
@@ -145,7 +146,28 @@ public:
         if (ptr is null) return defaultValue;
         return ptr.get!T;
     }
+    T getOrCreate(T)(string key, T delegate() provider) {
+        if (auto ptr = key in storage) {
+            try { return ptr.get!T; }
+            catch (VariantException) {}
+        }
+        auto value = provider();
+        set(key, value);
+        return value;
+    }
     void remove(string key) { storage.remove(key); }
+
+    /// removes all entries whose key starts with the given prefix.
+    void removeWithPrefix(string prefix) {
+        string[] toRemove;
+        foreach (key; storage.keys) {
+            if (key.startsWith(prefix))
+                toRemove ~= key;
+        }
+        foreach (key; toRemove)
+            storage.remove(key);
+    }
+
     void clear() { storage.clear(); }
 }
 
@@ -263,6 +285,39 @@ class ConfigManager : KeyValueStore {
         super.remove(key);
     }
 
+    override void removeWithPrefix(string prefix) {
+        // Collect all matching keys from both storages
+        string[] legacyMatches, configMatches;
+        foreach (key; storage.keys)
+            if (key.startsWith(prefix))
+                legacyMatches ~= key;
+        foreach (key; configStore.keys)
+            if (key.startsWith(prefix))
+                configMatches ~= key;
+
+        // Check protection on config keys before removing anything
+        foreach (key; configMatches) {
+            if (configStore[key].isDisableRemove)
+                throw new Exception("Config key '" ~ key ~ "' is protected and cannot be removed.");
+        }
+
+        // Remove legacy keys first
+        foreach (key; legacyMatches)
+            storage.remove(key);
+
+        // Remove config keys with events
+        foreach (key; configMatches) {
+            auto cv = configStore[key];
+            ConfigRemovedEvent ev;
+            ev.manager = this;
+            ev.key = key;
+            ev.oldValue = cv.value;
+            ev.flags = cv.flags;
+            onRemoved.fire(ev);
+            configStore.remove(key);
+        }
+    }
+
     override bool has(string key) {
         if (key in configStore) return true;
         return super.has(key);
@@ -293,7 +348,7 @@ class ConfigManager : KeyValueStore {
             ConfigValueFlags newFlags = (p.flags | addFlags) & ~removeFlags;
             if (newFlags != oldFlags) {
                 p.flags = newFlags;
-                // Fire event
+                
                 ConfigFlagsChangedEvent ev;
                 ev.manager = this;
                 ev.key = key;
@@ -364,5 +419,17 @@ class CacheManager : KeyValueStore {
                 refCounts.remove(key);
             }
         }
+    }
+
+    override void removeWithPrefix(string prefix) {
+        super.removeWithPrefix(prefix);
+
+        string[] toRemove;
+        foreach (key; refCounts.keys) {
+            if (key.startsWith(prefix))
+                toRemove ~= key;
+        }
+        foreach (key; toRemove)
+            refCounts.remove(key);
     }
 }

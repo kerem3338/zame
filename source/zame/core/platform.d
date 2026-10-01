@@ -12,6 +12,7 @@ import std.array : replicate;
 import zame;
 import zame.core.cache;
 import zame.core.profiler;
+import zame.core.fs;
 
 version (Windows) {
 	import core.sys.windows.windows;
@@ -119,14 +120,29 @@ struct Event {
 
 struct PlatformCapabilities {
 	bool hasSubWindows;
+	bool canMoveWindow;
+}
+
+struct DisplayInfo {
+	string name;
+	Size size;
+	Point position;
+	bool isPrimary;
+	float refreshRate;
 }
 
 class IPlatform {
 	abstract string platformName();
 	abstract PlatformCapabilities capabilities();
 
+	void setInstance(Instance inst) {}
+    void setIcon(string path) {}
+
 	abstract int createWindow(Window window);
 	abstract bool updateWindowSettings();
+	abstract void moveWindow(Window window, int x, int y);
+	abstract DisplayInfo[] getDisplays();
+	abstract DisplayInfo getPrimaryDisplay();
 	abstract void processMessages();
 	abstract void invalidate();
 	abstract void cleanup();
@@ -134,25 +150,32 @@ class IPlatform {
     abstract void exit();
 	abstract void setTargetFps(uint fps);
 	abstract uint getTargetFps();
-	void setInstance(Instance inst) {}
     abstract IAudioDevice getAudioDevice();
-    void setIcon(string path) {}
     
     abstract string getClipboard();
     abstract void setClipboard(string text);
     abstract void showMouse(bool visible);
+
+    abstract DeviceInfo getDeviceInfo();
+    
+    IGraphics getGraphics(Window window) {
+        return new SoftwareGraphics(window.surface);
+    }
 }
 
 class Window {
 	uint width;
 	uint height;
+	Point position;
 	Surface surface;
+	private IGraphics _graphics;
 	string title;
     string iconPath;
 	IPlatform platform;
 	Window parent;
 	UISystem ui;
 	ConfigManager settings;
+	WindowMenu windowMenu;
 
 	this(uint width, uint height, string title="Zame Engine") {
 		this.width = width;
@@ -162,8 +185,24 @@ class Window {
 		this.ui = new UISystem(1920, 1080);
 		this.ui.updateSize(width, height);
 		this.settings = new ConfigManager();
+		this.position = Point(0,0);
 
 		settings.set("window_resizable", true, ConfigValueFlags.disableRemove | ConfigValueFlags.typeMustBeSame);
+	}
+
+	@property IGraphics graphics() {
+		if (_graphics is null) {
+			if (platform !is null) {
+				_graphics = platform.getGraphics(this);
+			} else {
+				_graphics = new SoftwareGraphics(this.surface);
+			}
+		}
+		return _graphics;
+	}
+
+	@property void graphics(IGraphics g) {
+		_graphics = g;
 	}
 
 	int createWindow() {
@@ -179,6 +218,9 @@ class Window {
         this.width = width;
         this.height = height;
         this.surface = new Surface(width, height);
+        if (auto sw = cast(SoftwareGraphics)_graphics) {
+            sw.setTarget(this.surface);
+        }
         if (this.ui !is null) this.ui.updateSize(width, height);
     }
 
@@ -190,12 +232,15 @@ class Window {
     	return Rect(0, 0, width, height);
     }
 
-
+    Rect globalRect() {
+    	return Rect(position.x, position.y, width, height);
+    }
 }
 
+/// Zame Engine "Core" Instance
 class Instance {
 	Window window;
-	ConfigManager settings;
+	ConfigManager config;
 	Event[] eventQueue;
 	IPlatform platform;
 	Logger logger;
@@ -203,6 +248,7 @@ class Instance {
     IAudioDevice audio;
     SoundManager soundManager;
     int mouseX, mouseY;
+    VirtualFileSystem fs;
 
 	this(Window window, IPlatform platform) {
 		this.window = window;
@@ -210,12 +256,24 @@ class Instance {
 
 		this.logger = new Logger();
 		this.logger.addHandler(new MemoryHandler());
+
+		this.config = new ConfigManager();
+        this.fs = new VirtualFileSystem();
+        this.profiler = new Profiler();
 	}
 
+	/// Do initialization jobs
 	void doInitJobs() {
         this.audio = this.platform.getAudioDevice();
         this.soundManager = new SoundManager(this.audio);
-		this.logger.info(format("Zame Engine v%s (%s)", VERSION, this.platform.platformName()));
+		this.logger.info(format("Zame Engine v%s (%s)", ZAME_VERSION, this.platform.platformName()));
+		
+		this.config.set("zame.version", ZAME_VERSION, ConfigValueFlags.readOnly);
+		this.config.set("zame.instance.platform", this.platform.platformName(), ConfigValueFlags.readOnly);
+
+		DeviceInfo deviceInfo = this.platform.getDeviceInfo();
+		this.logger.info(format("Detected Device Information > %s (%dbit) (%f MB Total Ram)", deviceInfo.cpuModel, deviceInfo.pointerBits, deviceInfo.totalRam / 1048576));
+		this.logger.info("initialization finished");
 	}
 
 	void pushEvent(Event e) {
@@ -233,8 +291,9 @@ class Instance {
 		return events;
 	}
 
+	
 	void update() {
-
+		// not usefull for now but maybe *one day* we need this.
 	}
     
     void exit() {
@@ -242,6 +301,7 @@ class Instance {
     }
 }
 
+// TODO: move the functions below to somewhere else
 void messageBox(string title, string message, bool nonBlocking = false, bool writeToConsole = false) {
     void show() {
         version (Windows) {

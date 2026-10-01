@@ -6,6 +6,7 @@ import zame.core.common;
 import zame.core.graphics;
 import zame.core.platform;
 import zame.core.profiler;
+import zame.core.gui.ui : Length, UISystem, UIContext;
 
 enum Dock {
     None,
@@ -49,6 +50,53 @@ abstract class GUIObject {
     int[4] margin = [0, 0, 0, 0]; // left, top, right, bottom
     int[4] padding = [0, 0, 0, 0]; // left, top, right, bottom
     int spacing = 5;
+    
+    void setMargin(Length all, UISystem ui = null) {
+        int v = all.toIntPx(ui);
+        this.margin = [v, v, v, v];
+    }
+
+    void setMargin(Length vertical, Length horizontal, UISystem ui = null) {
+        int v = vertical.toIntPx(ui);
+        int h = horizontal.toIntPx(ui);
+        this.margin = [h, v, h, v];
+    }
+
+    void setMargin(Length top, Length right, Length bottom, Length left, UISystem ui = null) {
+        this.margin = [left.toIntPx(ui), top.toIntPx(ui), right.toIntPx(ui), bottom.toIntPx(ui)];
+    }
+
+    void setPadding(Length all, UISystem ui = null) {
+        int v = all.toIntPx(ui);
+        this.padding = [v, v, v, v];
+    }
+
+    void setPadding(Length vertical, Length horizontal, UISystem ui = null) {
+        int v = vertical.toIntPx(ui);
+        int h = horizontal.toIntPx(ui);
+        this.padding = [h, v, h, v];
+    }
+
+    void setPadding(Length top, Length right, Length bottom, Length left, UISystem ui = null) {
+        this.padding = [left.toIntPx(ui), top.toIntPx(ui), right.toIntPx(ui), bottom.toIntPx(ui)];
+    }
+
+    void setWidth(Length w, UISystem ui = null, float parentDim = 0) {
+        this.bounds.w = w.toIntPx(ui, parentDim);
+    }
+
+    void setHeight(Length h, UISystem ui = null, float parentDim = 0) {
+        this.bounds.h = h.toIntPx(ui, parentDim);
+    }
+
+    void setBounds(Length x, Length y, Length w, Length h, UISystem ui = null, float parentW = 0, float parentH = 0) {
+        this.bounds = Rect(
+            x.toIntPx(ui, parentW),
+            y.toIntPx(ui, parentH),
+            w.toIntPx(ui, parentW),
+            h.toIntPx(ui, parentH)
+        );
+    }
     
     @property Instance instance() { return manager ? manager.instance : null; }
     
@@ -278,7 +326,7 @@ class GUIManager {
             }
         }
     }
-
+    
     void cycleFocus(bool forward = true) {
         if (objects.length == 0) return;
 

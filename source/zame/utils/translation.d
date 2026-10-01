@@ -1,4 +1,4 @@
-module zame.translation;
+module zame.utils.translation;
 
 import zame.core.common;
 

@@ -21,10 +21,11 @@ struct SemanticVersion {
    int patch;
 }
 
-enum string VERSION = "0.0.4";
+enum string ZAME_VERSION = "0.0.5";
 enum string AUTHOR = "Kerem ATA (Zoda)";
 enum string LICENSE = "Apache-2.0";
 
+// core
 public import zame.core.common;
 public import zame.core.graphics;
 public import zame.core.font;
@@ -38,11 +39,16 @@ public import zame.core.profiler;
 public import zame.core.audio;
 public import zame.core.network;
 public import zame.core.math;
-public import zame.core.file;
 public import zame.core.gui.components;
 public import zame.core.profiler;
 public import zame.core.gui.ui;
 public import zame.core.cache;
 public import zame.core.animation;
-
-public import zame.translation;
+public import zame.core.device;
+public import zame.core.collision;
+public import zame.core.app;
+public import zame.core.fx;
+public import zame.core.fs;
+public import zame.core.path;
+// utils
+public import zame.utils.translation;

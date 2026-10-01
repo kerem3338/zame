@@ -1,3 +1,8 @@
+/**
+ * NOTICE
+ * 
+ * PLEASE DO NOT USE THIS MODULE UNTIL IT IS STABILE.
+**/
 module zame.core.network;
 
 import std.socket;
@@ -98,7 +103,6 @@ class NetworkClient {
 			ubyte[1] dummyData = [0];
 			ubyte[] handshake = buildPacket(4, 0, dummyData[], 0, 0); // Type 4 = Input
 			
-			// Send multiple times to ensure delivery (UDP is unreliable)
 			for (int i = 0; i < 3; i++) {
 				try {
 					socket.sendTo(handshake, serverAddr);

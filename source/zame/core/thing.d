@@ -14,9 +14,7 @@ struct ThingEvent {
 	Thing receiver;
 }
 
-/++ 
- * Like an entity but diffrent
- +/
+/// Like an entity but diffrent
 class Thing {
 	Rect rect;
 	string[] tags;
@@ -30,8 +28,11 @@ class Thing {
 	
 	void delegate(ThingEvent) onEvent;
 	
-	this(Rect rect) {
+	this(Rect rect, bool initSystems = true) {
 		this.rect = rect;
+		if (initSystems) {
+			animMgr = new AnimationManager(null);
+		}
 	}
 	
 	/* Events */
@@ -123,8 +124,10 @@ class ThingManager {
 	
 	uint generateId() {
 		if (freeIds.length > 0) {
-			return freeIds[0..1][0];
+			uint id = freeIds[0];
 			freeIds = freeIds[1..$];
+			return id;
+
 		}
 		return nextId++;
 	}
